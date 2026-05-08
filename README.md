@@ -7,8 +7,8 @@ This repository contains the ORIINU.AI backend API built with FastAPI.
 1. Create a Python 3.13.3 virtual environment
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
