@@ -165,7 +165,7 @@ uvicorn app.main:app --reload --port 8000
 ## Environment Variables
 
 Required for development:
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 - `GOOGLE_AI_STUDIO_KEY` (for LLM and embeddings)
 - `OPENAI_API_KEY` (fallback)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments)
@@ -177,6 +177,7 @@ Required for development:
 app/
 ├── main.py              # FastAPI application entry point
 ├── core/config.py       # Environment configuration
+├── core/security.py     # Auth deps: uses supabase.auth.get_user() (server-side JWT verification, works with any algorithm)
 ├── db/supabase.py       # Database client setup
 ├── services/            # Business logic
 │   ├── rag/            # RAG system (chunking, embedding, query)

@@ -21,6 +21,7 @@
 | 8 | **Smart chunking by DAY entry** replaces word-count chunking | The book has 365 structured daily entries — chunking by day gives perfect semantic RAG units |
 | 9 | **System prompt** updated with real book title, authors, and key concepts | Generic prompt replaced with ORIINU-specific context |
 | 10 | Book metadata seeded with real values from uploaded PDF | Title, authors, publisher, ISBN populated |
+| 11 | **JWT verification** uses `supabase.auth.get_user()` instead of local `python-jose` | Supabase projects now default to **ES256** signing algorithm; local `jwt.decode()` with hardcoded `HS256` fails. `supabase.auth.get_user()` delegates to Supabase Auth API, works with any algorithm. `python-jose` dependency removed. |
 
 ---
 
@@ -264,7 +265,6 @@ python-dotenv==1.0.1
 
 # Supabase
 supabase==2.9.1
-python-jose[cryptography]==3.3.0
 
 # RAG — PDF processing
 pypdf==5.1.0
@@ -752,11 +752,13 @@ supabase_admin: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_
 ```
 
 ### app/core/security.py
+
+**IMPORTANT:** Uses `supabase.auth.get_user()` (server-side verification) instead of local JWT decoding. This works with **any signing algorithm** (HS256, ES256, RS256) that Supabase Auth uses, and automatically handles key rotation. No `python-jose` dependency needed.
+
 ```python
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-from app.core.config import settings
+from app.db.supabase import supabase, supabase_admin
 
 bearer_scheme = HTTPBearer()
 
@@ -765,13 +767,9 @@ def verify_token(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ) -> dict:
     try:
-        return jwt.decode(
-            credentials.credentials,
-            settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-    except JWTError:
+        user = supabase.auth.get_user(credentials.credentials)
+        return {"sub": user.user.id}
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token.",
@@ -783,10 +781,30 @@ def get_current_user_id(payload: dict = Depends(verify_token)) -> str:
     return payload["sub"]
 
 
-def require_admin(payload: dict = Depends(verify_token)) -> dict:
-    if payload.get("user_metadata", {}).get("role") != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required.")
-    return payload
+async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> dict:
+    """
+    Fetches the user's profile from the database.
+    This is more secure than trusting the JWT payload for sensitive fields like 'role'.
+    """
+    result = supabase_admin.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found."
+        )
+    return result.data
+
+
+def require_admin(profile: dict = Depends(get_current_profile)) -> dict:
+    """
+    Ensures the current user has an 'admin' role in their profile.
+    """
+    if profile.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required."
+        )
+    return profile
 ```
 
 ### app/services/rag/chunker.py
