@@ -1,5 +1,7 @@
 from fastapi import HTTPException, status
+from app.core.config import settings
 from app.db.supabase import supabase_admin
+from app.services.auth.reset_store import create_reset_token, consume_reset_token
 
 
 def signup_user(email: str, password: str, full_name: str | None = None) -> dict:
@@ -76,39 +78,39 @@ def verify_email_token(email: str, token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def verify_forgot_password_token(email: str, token: str) -> dict:
+def verify_forgot_password_token(email: str, otp_token: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"email": email, "token": token, "type": "recovery"})
-        return {
-            "message": "Password reset otp verified.",
-            "user": result.user.dict(exclude_none=True) if result.user else None,
-            "session": result.session.dict(exclude_none=True) if result.session else None,
-        }
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-
-def reset_password(access_token: str, password: str) -> dict:
-    try:
-        result = supabase_admin.auth.get_user(access_token)
+        result = supabase_admin.auth.verify_otp({"email": email, "token": otp_token, "type": "recovery"})
         if not result.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired recovery session.",
+                detail="Invalid or expired OTP.",
             )
 
         user_id = getattr(result.user, "id", None)
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid user information returned during session verification.",
+                detail="Unable to identify user from OTP verification.",
             )
 
-        updated = supabase_admin.auth.admin.update_user_by_id(user_id, {"password": password})
-        return {
-            "message": "Password has been reset successfully.",
-            "user": getattr(updated, "user", None) and updated.user.dict(exclude_none=True),
-        }
+        access_token = create_reset_token(user_id)
+        return {"message": "OTP verified.", "access_token": access_token}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+def reset_password(access_token: str, password: str) -> dict:
+    try:
+        supabase_admin.options.headers["Authorization"] = (
+            f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
+        )
+
+        user_id = consume_reset_token(access_token)
+        supabase_admin.auth.admin.update_user_by_id(user_id, {"password": password})
+        return {"message": "Password has been reset successfully."}
     except HTTPException:
         raise
     except Exception as exc:
