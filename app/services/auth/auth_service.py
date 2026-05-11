@@ -64,15 +64,11 @@ def forgot_password(email: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def resend_forgot_password(email: str) -> dict:
-    return forgot_password(email)
-
-
-def verify_email_token(token: str) -> dict:
+def verify_email_token(email: str, token: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"token": token, "type": "signup"})
+        result = supabase_admin.auth.verify_otp({"email": email, "token": token, "type": "signup"})
         return {
-            "message": "Email verification successful.",
+            "message": "Email verified successfully.",
             "user": result.user.dict(exclude_none=True) if result.user else None,
             "session": result.session.dict(exclude_none=True) if result.session else None,
         }
@@ -80,11 +76,11 @@ def verify_email_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def verify_forgot_password_token(token: str) -> dict:
+def verify_forgot_password_token(email: str, token: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"token": token, "type": "recovery"})
+        result = supabase_admin.auth.verify_otp({"email": email, "token": token, "type": "recovery"})
         return {
-            "message": "Password reset token verified.",
+            "message": "Password reset otp verified.",
             "user": result.user.dict(exclude_none=True) if result.user else None,
             "session": result.session.dict(exclude_none=True) if result.session else None,
         }
@@ -92,20 +88,20 @@ def verify_forgot_password_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def reset_password(token: str, password: str) -> dict:
+def reset_password(access_token: str, password: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"token": token, "type": "recovery"})
+        result = supabase_admin.auth.get_user(access_token)
         if not result.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unable to verify recovery token.",
+                detail="Invalid or expired recovery session.",
             )
 
         user_id = getattr(result.user, "id", None)
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid user information returned during token verification.",
+                detail="Invalid user information returned during session verification.",
             )
 
         updated = supabase_admin.auth.admin.update_user_by_id(user_id, {"password": password})

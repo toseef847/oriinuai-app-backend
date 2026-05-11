@@ -23,6 +23,19 @@ def get_current_user_id(payload: dict = Depends(verify_token)) -> str:
     return payload["sub"]
 
 
+async def get_auth_user_status(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+) -> dict:
+    try:
+        user = supabase.auth.get_user(credentials.credentials)
+        return {
+            "email_verified": user.user.email_confirmed_at is not None,
+            "phone_verified": user.user.phone_confirmed_at is not None,
+        }
+    except Exception:
+        return {"email_verified": False, "phone_verified": False}
+
+
 async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> dict:
     """
     Fetches the user's profile from the database.

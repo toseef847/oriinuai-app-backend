@@ -25,3 +25,9 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 curl http://localhost:8000/health
 ```
+
+5. Visit the Swagger docs:
+
+```bash
+curl http://localhost:8000/docs
+```

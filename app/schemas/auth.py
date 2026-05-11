@@ -16,12 +16,18 @@ class EmailRequest(BaseModel):
     email: EmailStr
 
 
-class VerifyTokenRequest(BaseModel):
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    token: str
+
+
+class VerifyForgotPasswordRequest(BaseModel):
+    email: EmailStr
     token: str
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
+    access_token: str
     password: str
 
 
