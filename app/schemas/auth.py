@@ -63,5 +63,29 @@ class ResetPasswordRequest(BaseModel):
         return self
 
 
+class UpdatePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+    @model_validator(mode="after")
+    def validate_passwords(self):
+        if self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        if self.new_password == self.current_password:
+            raise ValueError("New password must be different from current password")
+        return self
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = None
+    bio: str | None = None
+
+
 class RefreshTokenRequest(BaseModel):
     refresh_token: str

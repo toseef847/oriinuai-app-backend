@@ -321,6 +321,10 @@ dist/
 APP_NAME=ORIINU.AI
 DEBUG=true
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
+FRONTEND_URL=http://localhost:3000
+STRIPE_CHECKOUT_SUCCESS_PATH=/billing/success
+STRIPE_CHECKOUT_CANCEL_PATH=/billing/cancel
+STRIPE_PORTAL_RETURN_PATH=/account/billing
 
 # ── Supabase ─────────────────────────────────────────────────────────
 # Supabase Dashboard → project → Settings → API
@@ -369,6 +373,7 @@ INNER_CIRCLE_RAG_CHUNKS=10
 # ── Stripe ───────────────────────────────────────────────────────────
 STRIPE_SECRET_KEY=sk_test_your_key_here
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
+# Stripe price IDs should live in public.plans first; these env vars are fallback bootstrap values only
 STRIPE_CORE_MONTHLY_PRICE_ID=price_xxx
 STRIPE_CORE_YEARLY_PRICE_ID=price_xxx
 STRIPE_INNER_MONTHLY_PRICE_ID=price_xxx
@@ -399,6 +404,10 @@ class Settings(BaseSettings):
     APP_NAME: str = "ORIINU.AI"
     DEBUG: bool = False
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000"]
+    FRONTEND_URL: str = "http://localhost:3000"
+    STRIPE_CHECKOUT_SUCCESS_PATH: str = "/billing/success"
+    STRIPE_CHECKOUT_CANCEL_PATH: str = "/billing/cancel"
+    STRIPE_PORTAL_RETURN_PATH: str = "/account/billing"
 
     # Supabase
     SUPABASE_URL: str
@@ -1666,9 +1675,15 @@ curl http://localhost:8000/health
 
 1. `app/api/v1/endpoints/auth.py` — GET /auth/me (returns profile + active plan)
 2. `app/api/v1/endpoints/plans.py` — GET /plans (lists plans for frontend plan selection page)
-3. `app/api/v1/endpoints/payments.py` — POST /checkout, POST /webhook, GET /portal
-4. `app/api/v1/endpoints/users.py` — GET /users/me/usage (today's usage vs. limit)
-5. `app/api/v1/endpoints/admin/users.py` — list users, update role, suspend account
-6. `app/api/v1/endpoints/admin/insights.py` — usage stats, revenue summary, active users per plan
-7. `scripts/ingest_book.py` — CLI script to ingest the 365 Proverbs PDF directly
-8. `tests/unit/test_chunker.py` — assert 365 chunks found, assert Day 1 content correct
+3. `app/api/v1/endpoints/users.py` — GET /users/me/usage (today's usage vs. limit)
+4. `app/api/v1/endpoints/admin/users.py` — list users, update role, suspend account
+5. `app/api/v1/endpoints/admin/insights.py` — usage stats, revenue summary, active users per plan
+6. `scripts/ingest_book.py` — CLI script to ingest the 365 Proverbs PDF directly
+7. `tests/unit/test_chunker.py` — assert 365 chunks found, assert Day 1 content correct
+
+### Payments implementation notes
+
+- `app/api/v1/endpoints/payments.py` serves `POST /checkout`, `POST /webhook`, and `GET /portal`.
+- Checkout price resolution is database-first: `public.plans.stripe_monthly_price_id` and `public.plans.stripe_yearly_price_id` are preferred.
+- If a plan row is missing a price ID, the backend may fall back to the matching Stripe env var until the database is seeded.
+- Webhooks verify Stripe signatures and sync subscription and payment records into Supabase.

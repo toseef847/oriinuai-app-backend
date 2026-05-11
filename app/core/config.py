@@ -1,5 +1,7 @@
+from typing import Any, List
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
 
 
 class Settings(BaseSettings):
@@ -14,16 +16,34 @@ class Settings(BaseSettings):
     APP_NAME: str = "ORIINU.AI"
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000"
+    FRONTEND_URL: str = "http://localhost:3000"
+    STRIPE_CHECKOUT_SUCCESS_PATH: str = "/billing/success"
+    STRIPE_CHECKOUT_CANCEL_PATH: str = "/billing/cancel"
+    STRIPE_PORTAL_RETURN_PATH: str = "/account/billing"
 
     @property
     def allowed_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+                return False
+        return bool(value)
 
     # Supabase
     SUPABASE_URL: str
     SUPABASE_ANON_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
     SUPABASE_JWT_SECRET: str
+    PROFILE_IMAGE_BUCKET: str = "profile-images"
 
     # LLM — google_ai_studio | openai (no ollama)
     LLM_PROVIDER: str = "google_ai_studio"

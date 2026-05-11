@@ -17,6 +17,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - All configuration must come from environment variables via `app/core/config.py`
 - Database access only through `app/db/` and `app/services/`
 - Use Row Level Security (RLS) for all Supabase queries
+- For billing, treat `public.plans.stripe_monthly_price_id` and `public.plans.stripe_yearly_price_id` as the source of truth; Stripe env price IDs are fallback bootstrap values only
 - Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS_V2.md`
 
 **Key Areas**:
@@ -37,13 +38,14 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 
 **Key Tables**:
 - `profiles` - User profiles
-- `plans` - Subscription plans
+- `plans` - Subscription plans and Stripe price IDs
 - `subscriptions` - User plan assignments
 - `books` - Book metadata
 - `book_chunks` - Vectorized content chunks
 - `chat_sessions` - Chat conversation sessions
 - `chat_messages` - Individual messages
 - `usage_logs` - Daily usage tracking
+- `payments` - Stripe invoice payment history
 
 ### 3. RAG Agent
 **Purpose**: Retrieval-Augmented Generation system management
@@ -168,7 +170,8 @@ Required for development:
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 - `GOOGLE_AI_STUDIO_KEY` (for LLM and embeddings)
 - `OPENAI_API_KEY` (fallback)
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments)
+- `FRONTEND_URL` (for Stripe checkout and billing portal redirects)
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments; price IDs should live in `public.plans` first)
 - `REDIS_URL` (for rate limiting)
 
 ## Key Files & Directories
