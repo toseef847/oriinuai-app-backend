@@ -19,7 +19,7 @@ def validate_password_strength(password: str) -> str:
 class SignUpRequest(BaseModel):
     email: EmailStr
     password: str
-    full_name: str | None = None
+    full_name: str
 
     @field_validator("password")
     @classmethod
