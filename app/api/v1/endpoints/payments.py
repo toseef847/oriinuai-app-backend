@@ -4,12 +4,15 @@ from app.core.security import get_current_profile
 from app.schemas.payment import (
     CreateCheckoutSessionRequest,
     CreateCheckoutSessionResponse,
+    CreateUpgradeRequest,
     CreatePortalSessionResponse,
+    UpgradePaymentResponse,
     StripeWebhookResponse,
 )
 from app.services.payments.stripe_service import (
     create_checkout_session,
     create_portal_session,
+    change_subscription_plan,
     handle_webhook_event,
 )
 
@@ -35,6 +38,26 @@ async def checkout(
         billing_interval=payload.billing_interval,
     )
     return result
+
+
+@router.post("/upgrade", response_model=UpgradePaymentResponse)
+async def upgrade(
+    payload: CreateUpgradeRequest,
+    profile: dict = Depends(get_current_profile),
+):
+    email = profile.get("email")
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User email is required to upgrade a subscription.",
+        )
+
+    return change_subscription_plan(
+        user_id=profile["id"],
+        email=email,
+        plan_name=payload.plan_name,
+        billing_interval=payload.billing_interval,
+    )
 
 
 @router.get("/portal", response_model=CreatePortalSessionResponse)

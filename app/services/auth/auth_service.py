@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from app.core.config import settings
-from app.db.supabase import supabase_admin
+from app.db.supabase import create_auth_supabase_client, supabase_admin
 from app.services.auth.reset_store import create_reset_token, consume_reset_token
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -15,14 +15,18 @@ ALLOWED_IMAGE_CONTENT_TYPES = {
 }
 
 
+def _auth_client():
+    return create_auth_supabase_client()
+
+
 def signup_user(email: str, password: str, full_name: str | None = None) -> dict:
     try:
-        result = supabase_admin.auth.sign_up(
+        result = _auth_client().auth.sign_up(
             {
                 "email": email,
                 "password": password,
                 "options": {
-                    "data": {"full_name": full_name or ""},
+                    "data": {"full_name": full_name} if full_name else {},
                 },
             }
         )
@@ -36,7 +40,7 @@ def signup_user(email: str, password: str, full_name: str | None = None) -> dict
 
 def login_user(email: str, password: str) -> dict:
     try:
-        result = supabase_admin.auth.sign_in_with_password(
+        result = _auth_client().auth.sign_in_with_password(
             {
                 "email": email,
                 "password": password,
@@ -52,7 +56,7 @@ def login_user(email: str, password: str) -> dict:
 
 def refresh_token(refresh_token: str) -> dict:
     try:
-        result = supabase_admin.auth.refresh_session(refresh_token)
+        result = _auth_client().auth.refresh_session(refresh_token)
         return {
             "user": result.user.dict(exclude_none=True) if result.user else None,
             "session": result.session.dict(exclude_none=True) if result.session else None,
@@ -63,7 +67,7 @@ def refresh_token(refresh_token: str) -> dict:
 
 def resend_email_verification(email: str) -> dict:
     try:
-        supabase_admin.auth.resend({"type": "signup", "email": email})
+        _auth_client().auth.resend({"type": "signup", "email": email})
         return {"message": "Verification email resent."}
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -71,7 +75,7 @@ def resend_email_verification(email: str) -> dict:
 
 def forgot_password(email: str) -> dict:
     try:
-        supabase_admin.auth.reset_password_for_email(email)
+        _auth_client().auth.reset_password_for_email(email)
         return {"message": "Password reset email sent."}
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -79,7 +83,7 @@ def forgot_password(email: str) -> dict:
 
 def verify_email_token(email: str, token: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"email": email, "token": token, "type": "signup"})
+        result = _auth_client().auth.verify_otp({"email": email, "token": token, "type": "signup"})
         return {
             "message": "Email verified successfully.",
             "user": result.user.dict(exclude_none=True) if result.user else None,
@@ -91,7 +95,7 @@ def verify_email_token(email: str, token: str) -> dict:
 
 def verify_forgot_password_token(email: str, otp_token: str) -> dict:
     try:
-        result = supabase_admin.auth.verify_otp({"email": email, "token": otp_token, "type": "recovery"})
+        result = _auth_client().auth.verify_otp({"email": email, "token": otp_token, "type": "recovery"})
         if not result.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -130,7 +134,7 @@ def update_user_password(user_id: str, current_password: str, new_password: str)
             )
 
         try:
-            supabase_admin.auth.sign_in_with_password(
+            _auth_client().auth.sign_in_with_password(
                 {"email": profile["email"], "password": current_password}
             )
         except Exception:
@@ -139,11 +143,6 @@ def update_user_password(user_id: str, current_password: str, new_password: str)
                 detail="Current password is incorrect.",
             )
             
-        # Fix the header bug in supabase client by setting the service role key directly before the admin call
-        supabase_admin.options.headers["Authorization"] = (
-            f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
-        )
-
         supabase_admin.auth.admin.update_user_by_id(user_id, {"password": new_password})
         
         return {
@@ -197,11 +196,6 @@ def update_user_profile(
             updates["profile_image_path"] = storage_path
 
         if updates:
-            # Fix the header bug in supabase client by setting the service role key directly before the admin call
-            supabase_admin.options.headers["Authorization"] = (
-                f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
-            )
-            
             supabase_admin.table("profiles").update(updates).eq("id", user_id).execute()
             return {"message": "Profile updated successfully.", "profile": updates}
 
@@ -214,10 +208,6 @@ def update_user_profile(
 
 def reset_password(access_token: str, password: str) -> dict:
     try:
-        supabase_admin.options.headers["Authorization"] = (
-            f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
-        )
-
         user_id = consume_reset_token(access_token)
         supabase_admin.auth.admin.update_user_by_id(user_id, {"password": password})
         return {"message": "Password has been reset successfully."}
