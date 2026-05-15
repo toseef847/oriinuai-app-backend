@@ -26,12 +26,16 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Database operations in `app/db/`
 - Configuration in `app/core/`
 
+**Important**:
+- Auth uses OTP flows (signup confirmation, forgot-password recovery) — never URL-based tokens
+- `supabase_admin.options.headers` shares the same dict as `supabase_admin.auth._headers`; always reset the Authorization header to `Bearer {service_role_key}` before admin API calls
+
 ### 2. Database Agent
 **Purpose**: Database schema management and SQL operations
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/05_triggers.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/06_password_resets.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google text-embedding-004
 - Maintain Row Level Security policies for all tables
@@ -46,6 +50,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - `chat_messages` - Individual messages
 - `usage_logs` - Daily usage tracking
 - `payments` - Stripe invoice payment history
+- `password_resets` - One-time password reset tokens (15min expiry)
 
 ### 3. RAG Agent
 **Purpose**: Retrieval-Augmented Generation system management
@@ -131,7 +136,8 @@ uvicorn app.main:app --reload --port 8000
 ### API Standards
 - RESTful endpoint naming
 - Proper HTTP status codes
-- JSON request/response bodies
+- **Standardized Response Pattern**: All endpoints must return the `ApiResponse` envelope: `{ "status": int, "message": str, "data": Any | null }` using helpers from `app/utils/response.py`.
+- **Validation Errors**: Standardized 422 errors return a simplified message string instead of nested arrays.
 - Authentication via JWT tokens
 - Rate limiting and usage tracking
 
@@ -172,26 +178,39 @@ Required for development:
 - `OPENAI_API_KEY` (fallback)
 - `FRONTEND_URL` (for Stripe checkout and billing portal redirects)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments; price IDs should live in `public.plans` first)
-- `REDIS_URL` (for rate limiting)
+- `REDIS_URL` (for rate limiting, optional)
 
 ## Key Files & Directories
 
 ```
 app/
-├── main.py              # FastAPI application entry point
+├── main.py              # FastAPI entry point + global exception handlers for standardized responses
 ├── core/config.py       # Environment configuration
-├── core/security.py     # Auth deps: uses supabase.auth.get_user() (server-side JWT verification, works with any algorithm)
+├── core/security.py     # Auth deps: uses supabase.auth.get_user()
 ├── db/supabase.py       # Database client setup
+├── utils/
+│   └── response.py      # Standardized API response helpers (api_success, api_error)
 ├── services/            # Business logic
+│   ├── auth/
+│   │   ├── auth_service.py  # Auth functions (signup, login, OTP verify, password reset)
+│   │   └── reset_store.py   # Password reset token CRUD via DB
 │   ├── rag/            # RAG system (chunking, embedding, query)
 │   ├── llm/            # LLM providers (Google, OpenAI)
 │   └── plan_service.py # Subscription plan logic
 └── api/v1/endpoints/   # API route handlers
+    └── auth.py         # Auth endpoints, incl. /me with email_verified/phone_verified
 
 sql/                     # Database migrations (numbered)
 tests/                   # Test suites
 scripts/                 # Utility scripts
 ```
+
+## Auth Architecture (OTP flows)
+
+- All email verifications use OTP (not URL tokens): signup confirmation, forgot-password recovery
+- `/forgot-password` sends OTP; `/verify-forgot-password` validates OTP → stores `password_resets` row → returns custom `access_token`; `/reset-password` consumes that token and updates password via admin API
+- Login JWT sessions must NEVER substitute for OTP-based reset tokens
+- **Critical**: `supabase_admin.options.headers` is the SAME dict object as `supabase_admin.auth._headers`. Auth operations that return a session (`sign_up`, `sign_in_with_password`, `verify_otp`) trigger `SIGNED_IN` → `_listen_to_auth_events` → the `Authorization` header gets replaced with the user's JWT. Before any admin API call (`admin.update_user_by_id`), the header MUST be reset: `supabase_admin.options.headers["Authorization"] = f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"`
 
 ## Communication Guidelines
 

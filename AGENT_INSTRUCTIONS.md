@@ -22,6 +22,7 @@
 | 9 | **System prompt** updated with real book title, authors, and key concepts | Generic prompt replaced with ORIINU-specific context |
 | 10 | Book metadata seeded with real values from uploaded PDF | Title, authors, publisher, ISBN populated |
 | 11 | **JWT verification** uses `supabase.auth.get_user()` instead of local `python-jose` | Supabase projects now default to **ES256** signing algorithm; local `jwt.decode()` with hardcoded `HS256` fails. `supabase.auth.get_user()` delegates to Supabase Auth API, works with any algorithm. `python-jose` dependency removed. |
+| 12 | **Standardized API Response Pattern** | All API responses now use a universal JSON envelope: `{status, message, data}`. Standardized error handling and simplified 422 validation messages. |
 
 ---
 
@@ -203,7 +204,7 @@ oriinu-backend/
 │   └── utils/
 │       ├── __init__.py
 │       ├── pdf_extractor.py
-│       └── response.py
+│       └── response.py        # ← UNIVERSAL: Standardized {status, message, data} envelope
 │
 ├── sql/
 │   ├── 01_enable_pgvector.sql
@@ -1377,6 +1378,51 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     full_text = "\n\n".join(pages)
     full_text = full_text.replace("\x00", "")
     return full_text
+```
+
+### app/utils/response.py
+```python
+from typing import Any, Generic, TypeVar
+from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+
+T = TypeVar("T")
+
+class ApiResponse(BaseModel, Generic[T]):
+    status: int
+    message: str
+    data: T | None = None
+
+def api_success(
+    data: Any = None, 
+    message: str = "Operation successful", 
+    status_code: int = 200
+) -> JSONResponse:
+    """
+    Returns a standardized successful JSON response.
+    """
+    content = jsonable_encoder({
+        "status": status_code,
+        "message": message,
+        "data": data
+    })
+    return JSONResponse(status_code=status_code, content=content)
+
+def api_error(
+    message: str = "An error occurred", 
+    status_code: int = 400, 
+    data: Any = None
+) -> JSONResponse:
+    """
+    Returns a standardized error JSON response.
+    """
+    content = jsonable_encoder({
+        "status": status_code,
+        "message": message,
+        "data": data
+    })
+    return JSONResponse(status_code=status_code, content=content)
 ```
 
 ### app/api/v1/endpoints/chat.py

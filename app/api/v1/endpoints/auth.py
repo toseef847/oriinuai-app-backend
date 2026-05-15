@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 from app.core.security import get_auth_user_status, get_current_profile
+from app.utils.response import api_success
 from app.services.auth.auth_service import (
     forgot_password,
     login_user,
@@ -26,42 +27,54 @@ router = APIRouter()
 
 @router.post("/signup")
 async def signup(payload: SignUpRequest):
-    return signup_user(payload.email, payload.password, payload.full_name)
+    data = signup_user(payload.email, payload.password, payload.full_name)
+    return api_success(
+        data=data,
+        message="Registration successful. Please check your email for verification.",
+        status_code=status.HTTP_201_CREATED
+    )
 
 
 @router.post("/login")
 async def login(payload: LoginRequest):
-    return login_user(payload.email, payload.password)
+    data = login_user(payload.email, payload.password)
+    return api_success(data=data, message="Login successful")
 
 
 @router.post("/refresh")
 async def refresh(payload: RefreshTokenRequest):
-    return refresh_token_service(payload.refresh_token)
+    data = refresh_token_service(payload.refresh_token)
+    return api_success(data=data, message="Token refreshed")
 
 
 @router.post("/resend-email-verification")
 async def resend_email_verification_endpoint(payload: EmailRequest):
-    return resend_email_verification(payload.email)
+    data = resend_email_verification(payload.email)
+    return api_success(data=data, message="Verification email resent")
 
 
 @router.post("/forgot-password")
 async def forgot_password_endpoint(payload: EmailRequest):
-    return forgot_password(payload.email)
+    data = forgot_password(payload.email)
+    return api_success(data=data, message="Password reset email sent")
 
 
 @router.post("/verify-email")
 async def verify_email(payload: VerifyEmailRequest):
-    return verify_email_token(payload.email, payload.token)
+    data = verify_email_token(payload.email, payload.token)
+    return api_success(data=data, message="Email verified successfully")
 
 
 @router.post("/verify-forgot-password")
 async def verify_forgot_password(payload: VerifyForgotPasswordRequest):
-    return verify_forgot_password_token(payload.email, payload.token)
+    data = verify_forgot_password_token(payload.email, payload.token)
+    return api_success(data=data, message="OTP verified")
 
 
 @router.post("/reset-password")
 async def reset_password_endpoint(payload: ResetPasswordRequest):
-    return reset_password(payload.access_token, payload.password)
+    data = reset_password(payload.access_token, payload.password)
+    return api_success(data=data, message="Password has been reset successfully")
 
 
 @router.get("/me")
@@ -69,7 +82,6 @@ async def get_current_user(
     profile: dict = Depends(get_current_profile),
     auth_status: dict = Depends(get_auth_user_status),
 ):
-    
     subscription = (
         supabase_admin.table("subscriptions")
         .select("*, plans(*)")
@@ -80,7 +92,10 @@ async def get_current_user(
         .data
     )
     profile.update(auth_status)
-    return {
-        "profile": profile,
-        "subscription": subscription,
-    }
+    return api_success(
+        data={
+            "profile": profile,
+            "subscription": subscription,
+        },
+        message="User profile retrieved"
+    )

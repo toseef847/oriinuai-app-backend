@@ -1,13 +1,8 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-
 from app.core.security import get_current_profile
 from app.schemas.payment import (
     CreateCheckoutSessionRequest,
-    CreateCheckoutSessionResponse,
     CreateUpgradeRequest,
-    CreatePortalSessionResponse,
-    UpgradePaymentResponse,
-    StripeWebhookResponse,
 )
 from app.services.payments.stripe_service import (
     create_checkout_session,
@@ -15,11 +10,12 @@ from app.services.payments.stripe_service import (
     change_subscription_plan,
     handle_webhook_event,
 )
+from app.utils.response import api_success
 
 router = APIRouter()
 
 
-@router.post("/checkout", response_model=CreateCheckoutSessionResponse)
+@router.post("/checkout", response_model=None)
 async def checkout(
     payload: CreateCheckoutSessionRequest,
     profile: dict = Depends(get_current_profile),
@@ -31,16 +27,16 @@ async def checkout(
             detail="User email is required to create a checkout session.",
         )
 
-    result = create_checkout_session(
+    data = create_checkout_session(
         user_id=profile["id"],
         email=email,
         plan_name=payload.plan_name,
         billing_interval=payload.billing_interval,
     )
-    return result
+    return api_success(data=data, message="Checkout session created")
 
 
-@router.post("/upgrade", response_model=UpgradePaymentResponse)
+@router.post("/upgrade", response_model=None)
 async def upgrade(
     payload: CreateUpgradeRequest,
     profile: dict = Depends(get_current_profile),
@@ -52,20 +48,22 @@ async def upgrade(
             detail="User email is required to upgrade a subscription.",
         )
 
-    return change_subscription_plan(
+    data = change_subscription_plan(
         user_id=profile["id"],
         email=email,
         plan_name=payload.plan_name,
         billing_interval=payload.billing_interval,
     )
+    return api_success(data=data, message="Subscription plan update initiated")
 
 
-@router.get("/portal", response_model=CreatePortalSessionResponse)
+@router.get("/portal", response_model=None)
 async def portal(profile: dict = Depends(get_current_profile)):
-    return create_portal_session(profile["id"])
+    data = create_portal_session(profile["id"])
+    return api_success(data=data, message="Portal session created")
 
 
-@router.post("/webhook", response_model=StripeWebhookResponse)
+@router.post("/webhook", response_model=None)
 async def webhook(
     request: Request,
     stripe_signature: str = Header(default="", alias="Stripe-Signature"),
@@ -77,4 +75,5 @@ async def webhook(
         )
 
     payload = (await request.body()).decode("utf-8")
-    return handle_webhook_event(payload, stripe_signature)
+    data = handle_webhook_event(payload, stripe_signature)
+    return api_success(data=data, message="Webhook processed")
