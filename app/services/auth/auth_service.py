@@ -119,15 +119,22 @@ def verify_forgot_password_token(email: str, otp_token: str) -> dict:
 
 def update_user_password(user_id: str, current_password: str, new_password: str) -> dict:
     try:
-        profile = (
+        profile_res = (
             supabase_admin.table("profiles")
             .select("email")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
-            .data
         )
-        if not profile or not profile.get("email"):
+        
+        if not profile_res or not profile_res.data or len(profile_res.data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User profile not found.",
+            )
+            
+        profile = profile_res.data[0]
+        if not profile.get("email"):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User email not found.",

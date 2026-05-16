@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.core.security import get_current_user_id
@@ -6,6 +7,7 @@ from app.services.plan_service import get_user_plan, check_daily_limit
 from app.services.rag.query import build_rag_prompt
 from app.services.llm.factory import get_llm_provider
 from app.db.supabase import supabase_admin
+from app.utils.response import api_success
 import json
 
 router = APIRouter()
@@ -14,6 +16,51 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+
+
+@router.get("/chats")
+async def list_chats(user_id: str = Depends(get_current_user_id)):
+    """List all chat sessions for the current user."""
+    res = supabase_admin.table("chat_sessions").select(
+        "*"
+    ).eq("user_id", user_id).order("updated_at", desc=True).execute()
+    
+    return api_success(data=res.data, message="Chats retrieved successfully")
+
+
+@router.get("/chats/{session_id}")
+async def get_chat_history(
+    session_id: UUID, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """Retrieve full message history for a specific session."""
+    # Verify ownership
+    session_res = supabase_admin.table("chat_sessions").select(
+        "id"
+    ).eq("id", str(session_id)).eq("user_id", user_id).limit(1).execute()
+    
+    if not session_res or not session_res.data:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+    messages_res = supabase_admin.table("chat_messages").select(
+        "*"
+    ).eq("session_id", str(session_id)).order("created_at", desc=False).execute()
+    
+    return api_success(data=messages_res.data, message="Chat history retrieved")
+
+
+@router.delete("/chats/{session_id}")
+async def delete_chat(
+    session_id: UUID, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """Delete a chat session and all its messages."""
+    # Ownership is enforced via the eq("user_id", user_id) check in the delete
+    supabase_admin.table("chat_sessions").delete().eq(
+        "id", str(session_id)
+    ).eq("user_id", user_id).execute()
+    
+    return api_success(data={"deleted": True}, message="Chat deleted successfully")
 
 
 @router.post("/chat")
@@ -25,11 +72,24 @@ async def chat(
     check_daily_limit(user_id, plan.get("plan_name", "foundation"))
 
     session_id = request.session_id
+    is_new_session = False
+    
     if not session_id:
+        is_new_session = True
+        # Generate initial title from first message
+        title = request.message[:40] + ("..." if len(request.message) > 40 else "")
         session = supabase_admin.table("chat_sessions").insert(
-            {"user_id": user_id}
+            {"user_id": user_id, "title": title}
         ).execute()
         session_id = session.data[0]["id"]
+    else:
+        # Verify existing session exists and belongs to this user
+        session_res = supabase_admin.table("chat_sessions").select("id").eq(
+            "id", str(session_id)
+        ).eq("user_id", user_id).limit(1).execute()
+        
+        if not session_res or not session_res.data:
+            raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
 
     system_prompt, _ = await build_rag_prompt(
         user_message=request.message,
@@ -38,14 +98,15 @@ async def chat(
 
     history_result = supabase_admin.table("chat_messages").select(
         "role, content"
-    ).eq("session_id", session_id).order("created_at", desc=True).limit(6).execute()
+    ).eq("session_id", session_id).order("created_at", desc=True).limit(10).execute()
     history = list(reversed(history_result.data or []))
 
     llm = get_llm_provider(plan_tier=plan["llm_tier"])
 
     async def generate():
         full_response = []
-        yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
+        if is_new_session:
+            yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
 
         async for token in llm.stream_response(system_prompt, request.message, history):
             full_response.append(token)
@@ -54,10 +115,18 @@ async def chat(
         complete = "".join(full_response)
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
+        # 1. Save messages
         supabase_admin.table("chat_messages").insert([
             {"session_id": session_id, "role": "user",      "content": request.message},
             {"session_id": session_id, "role": "assistant", "content": complete, "model_used": plan["llm_tier"]},
         ]).execute()
+        
+        # 2. Update session timestamp
+        supabase_admin.table("chat_sessions").update(
+            {"updated_at": "now()"}
+        ).eq("id", session_id).execute()
+        
+        # 3. Track usage
         supabase_admin.rpc("increment_usage", {"p_user_id": user_id, "p_tokens": 0}).execute()
 
     return StreamingResponse(generate(), media_type="text/event-stream")

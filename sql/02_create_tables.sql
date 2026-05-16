@@ -50,6 +50,7 @@ create table public.books (
     author           text not null,
     publisher        text,
     isbn             text,
+    file_hash        text unique,        -- SHA-256 hash of file content
     storage_path     text not null,
     ingestion_status text not null default 'pending'
                          check (ingestion_status in ('pending', 'processing', 'ready', 'failed')),
@@ -70,7 +71,7 @@ values (
     'pending'
 );
 
--- book_chunks — vector(768) for Google text-embedding-004
+-- book_chunks — vector(768) for Google gemini-embedding-2
 create table public.book_chunks (
     id          uuid primary key default uuid_generate_v4(),
     book_id     uuid not null references public.books(id) on delete cascade,

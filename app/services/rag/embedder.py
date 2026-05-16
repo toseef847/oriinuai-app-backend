@@ -5,7 +5,7 @@ from app.core.config import settings
 class Embedder:
     """
     Cloud-only embedding provider.
-    EMBEDDING_PROVIDER=google  → Google text-embedding-004 (768 dims, free)
+    EMBEDDING_PROVIDER=google  → Google gemini-embedding-2 (768 dims, free)
     EMBEDDING_PROVIDER=openai  → OpenAI text-embedding-3-small (1536 dims, paid)
 
     NOTE: "local" is not supported. Do not add it.
@@ -33,15 +33,15 @@ class Embedder:
         """Embed a batch of texts. Returns list of float vectors."""
         if self.provider == "google":
             genai = self._get_google_client()
-            embeddings = []
-            for text in texts:
-                result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=text,
-                    task_type="retrieval_document",
-                )
-                embeddings.append(result["embedding"])
-            return embeddings
+            # Use gemini-embedding-2 for better performance and lower quota usage
+            result = genai.embed_content(
+                model="models/gemini-embedding-2",
+                content=texts,
+                task_type="retrieval_document",
+                output_dimensionality=768,
+            )
+            # When 'content' is a list, 'embedding' is a list of vectors
+            return result["embedding"]
 
         elif self.provider == "openai":
             client = self._get_openai_client()
@@ -63,9 +63,10 @@ class Embedder:
         if self.provider == "google":
             genai = self._get_google_client()
             result = genai.embed_content(
-                model="models/text-embedding-004",
+                model="models/gemini-embedding-2",
                 content=query,
                 task_type="retrieval_query",
+                output_dimensionality=768,
             )
             return result["embedding"]
         else:

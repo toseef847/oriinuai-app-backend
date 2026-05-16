@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     # LLM — google_ai_studio | openai (no ollama)
     LLM_PROVIDER: str = "google_ai_studio"
     GOOGLE_AI_STUDIO_KEY: str = ""
-    GEMMA_FREE_MODEL: str = "gemma-4-e4b-it"
-    GEMMA_PRO_MODEL: str = "gemma-4-27b-it"
-    GEMMA_ELITE_MODEL: str = "gemma-4-31b-it"
+    GEMMA_FREE_MODEL: str = "models/gemini-2.5-flash"
+    GEMMA_PRO_MODEL: str = "models/gemini-3-flash-preview"
+    GEMMA_ELITE_MODEL: str = "models/gemini-2.5-pro"
     OPENAI_API_KEY: str = ""
     OPENAI_MINI_MODEL: str = "gpt-4o-mini"
     OPENAI_FULL_MODEL: str = "gpt-4o"

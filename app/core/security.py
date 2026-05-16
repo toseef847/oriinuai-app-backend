@@ -41,13 +41,13 @@ async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> di
     Fetches the user's profile from the database.
     This is more secure than trusting the JWT payload for sensitive fields like 'role'.
     """
-    result = supabase_admin.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
-    if not result.data:
+    res = supabase_admin.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+    if not res or not res.data or len(res.data) == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found."
         )
-    return result.data
+    return res.data[0]
 
 
 def require_admin(profile: dict = Depends(get_current_profile)) -> dict:

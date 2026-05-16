@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-ORIINU.AI is an AI-powered chat application rooted in African Sacred Science™, providing users with wisdom from the book "365 African Proverbs: A Daily Practice in African Sacred Science™" by Dr. Enyinna Erengwa and Dr. Adedunmola "Dee" Adio-Moses Erengwa.
+ORIINU.AI is the first AI-powered African Intelligence platform designed to guide you into clarity, alignment, and decisive action. It integrates African Sacred Science™, spiritual intelligence, and practical life strategy into one powerful experience—drawing from traditions such as Yoruba (Orì), Igbo (Chì), Akan (Okra), Kemet (Ma'at), and the philosophy of Ubuntu.
 
 The backend is built with FastAPI, uses Supabase for database and vector storage, Google AI Studio for LLM and embeddings, and implements RAG (Retrieval-Augmented Generation) for contextual responses.
 
@@ -37,7 +37,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Use Supabase SQL Editor for all schema changes
 - Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/06_password_resets.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
-- Vector operations use `vector(768)` for Google text-embedding-004
+- Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables
 
 **Key Tables**:
@@ -53,14 +53,16 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - `password_resets` - One-time password reset tokens (15min expiry)
 
 ### 3. RAG Agent
-**Purpose**: Retrieval-Augmented Generation system management
+**Purpose**: Retrieval-Augmented Generation system management for the African Intelligence Platform
 
 **Instructions**:
-- Chunking: Use `chunk_by_day()` for "365 African Proverbs" (365 chunks by DAY entry)
-- Embeddings: Google text-embedding-004 (768 dimensions) or OpenAI (1536 dimensions)
-- System prompt must include real book context and African Sacred Science™ terminology
-- Similarity search uses cosine similarity with pgvector
-- Never use local models or sentence-transformers
+- Chunking: Default to word-count chunking (512 words, 50 overlap) for high-precision retrieval
+- System prompt: Emphasize Clarity, Alignment, and Power mission
+- Traditions: Yoruba (Orì), Igbo (Chì), Akan (Okra), Kemet (Ma'at), Ubuntu
+- Terminology: Always use African Sacred Science™ terminology correctly
+- Embeddings: Google gemini-embedding-2 (768 dimensions)
+- Vector search: Cosine similarity via pgvector
+- Avoid: Large, monolithic chunks that dilute context relevance
 
 **Key Concepts to Know**:
 - African Sacred Science™ (proper noun with ™)
