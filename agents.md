@@ -17,8 +17,9 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - All configuration must come from environment variables via `app/core/config.py`
 - Database access only through `app/db/` and `app/services/`
 - Use Row Level Security (RLS) for all Supabase queries
+- **Robust Query Pattern**: Always use `.limit(1).execute()` instead of `.maybe_single()` to handle PostgREST 204 errors safely.
 - For billing, treat `public.plans.stripe_monthly_price_id` and `public.plans.stripe_yearly_price_id` as the source of truth; Stripe env price IDs are fallback bootstrap values only
-- Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS_V2.md`
+- Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS.md`
 
 **Key Areas**:
 - API endpoints in `app/api/v1/endpoints/`
@@ -44,9 +45,9 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - `profiles` - User profiles
 - `plans` - Subscription plans and Stripe price IDs
 - `subscriptions` - User plan assignments
-- `books` - Book metadata
+- `books` - Book metadata (includes `file_hash` for duplicate check)
 - `book_chunks` - Vectorized content chunks
-- `chat_sessions` - Chat conversation sessions
+- `chat_sessions` - Chat conversation sessions (includes `title` and `updated_at` for sorting)
 - `chat_messages` - Individual messages
 - `usage_logs` - Daily usage tracking
 - `payments` - Stripe invoice payment history
@@ -61,6 +62,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Traditions: Yoruba (Orì), Igbo (Chì), Akan (Okra), Kemet (Ma'at), Ubuntu
 - Terminology: Always use African Sacred Science™ terminology correctly
 - Embeddings: Google gemini-embedding-2 (768 dimensions)
+- **Throttling**: Must use 15s delays between batches of 20 chunks during ingestion to stay under 30k TPM limit.
 - Vector search: Cosine similarity via pgvector
 - Avoid: Large, monolithic chunks that dilute context relevance
 

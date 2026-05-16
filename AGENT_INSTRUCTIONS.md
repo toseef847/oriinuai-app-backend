@@ -20,9 +20,11 @@
 | 7 | `EMBEDDING_PROVIDER` now supports `google` \| `openai` only | sentence-transformers removed |
 | 8 | **Word-count chunking (512 words)** is the primary strategy | Provides granular semantic units for precise "African Intelligence" retrieval across diverse life topics |
 | 9 | **System prompt** updated with platform-wide context | Mission: Clarity, Alignment, Power. Traditions: Yoruba, Igbo, Akan, Kemet, Ubuntu |
-| 10 | Book metadata seeded with real values from uploaded PDF | Title, authors, publisher, ISBN populated |
-| 11 | **JWT verification** uses `supabase.auth.get_user()` instead of local `python-jose` | Supabase projects now default to **ES256** signing algorithm; local `jwt.decode()` with hardcoded `HS256` fails. `supabase.auth.get_user()` delegates to Supabase Auth API, works with any algorithm. `python-jose` dependency removed. |
-| 12 | **Standardized API Response Pattern** | All API responses now use a universal JSON envelope: `{status, message, data}`. Standardized error handling and simplified 422 validation messages. |
+| 10 | **Duplicate Check via File Hashing** | PDF uploads now compute a SHA-256 hash to prevent duplicate ingestion of identical files |
+| 11 | **Non-blocking Uploads** | Supabase Storage upload moved to background tasks to keep API response times < 200ms |
+| 12 | **Model Throttling & Batching** | Implemented 15s delays and batching (20 chunks) for embeddings to stay under 30k TPM limit |
+| 13 | **Robust Query Pattern** | Replaced all `maybe_single()` with `limit(1).execute()` + explicit validation to handle library crashes on empty results |
+| 14 | **Chat Session Management** | Added endpoints for listing chats, retrieving full history, and deleting sessions |
 
 ---
 
@@ -959,6 +961,7 @@ embedder = Embedder()
 ### app/services/rag/ingestion.py
 
 ```python
+import asyncio
 from app.utils.pdf_extractor import extract_text_from_pdf
 from app.services.rag.chunker import chunk_by_day, chunk_text_generic
 from app.services.rag.embedder import embedder
@@ -966,17 +969,12 @@ from app.db.vector_store import vector_store
 from app.db.supabase import supabase_admin
 
 
-async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chunking: bool = True) -> dict:
+async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chunking: bool = False) -> dict:
     """
-    Full RAG ingestion pipeline for ORIINU.AI books.
-
-    For '365 African Proverbs': use_day_chunking=True (default)
-      → 365 chunks, one per daily law, perfect semantic units
-
-    For future books without daily structure: use_day_chunking=False
-      → Falls back to generic 512-word overlapping chunks
-
-    Called as a FastAPI BackgroundTask after admin PDF upload or manual retry.
+    Full RAG ingestion pipeline for ORIINU.AI.
+    
+    This function handles the initial storage upload (async), chunking, 
+    batch embedding with throttling, and vector store upsert.
     """
     try:
         # Step 0: Mark as processing
@@ -984,13 +982,32 @@ async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chu
             {"ingestion_status": "processing"}
         ).eq("id", book_id).execute()
 
-        # Step 0.5: Fetch from storage if bytes not provided (retry case)
-        if file_bytes is None:
-            book_result = supabase_admin.table("books").select("storage_path").eq("id", book_id).limit(1).execute()
-            if not book_result.data:
-                raise ValueError(f"Book with ID {book_id} not found.")
-            
-            storage_path = book_result.data["storage_path"]
+        # Step 0.5: Handle File Bytes and Storage
+        book_res = supabase_admin.table("books").select("storage_path").eq("id", book_id).limit(1).execute()
+        if not book_res or not book_res.data or len(book_res.data) == 0:
+            raise ValueError(f"Book with ID {book_id} not found.")
+        storage_path = book_res.data[0]["storage_path"]
+
+        if file_bytes:
+            # Async storage upload (fallback to update if duplicate lib bug occurs)
+            try:
+                supabase_admin.storage.from_("book-pdfs").upload(
+                    path=storage_path,
+                    file=file_bytes,
+                    file_options={"upsert": "true", "content-type": "application/pdf"}
+                )
+            except (Exception, UnboundLocalError) as e:
+                error_str = str(e).lower()
+                if "already exists" in error_str or "duplicate" in error_str or "local variable 'response'" in error_str:
+                    supabase_admin.storage.from_("book-pdfs").update(
+                        path=storage_path,
+                        file=file_bytes,
+                        file_options={"content-type": "application/pdf"}
+                    )
+                else:
+                    raise e
+        else:
+            # Retry case: download from storage
             file_bytes = supabase_admin.storage.from_("book-pdfs").download(storage_path)
 
         # Step 1: Extract text
@@ -998,33 +1015,50 @@ async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chu
         if not text:
             raise ValueError("No extractable text found in PDF.")
 
-        # Step 2: Chunk
+        # Step 2: Chunk (Default: Word-count for platform granularity)
         if use_day_chunking:
             day_chunks = chunk_by_day(text)
             if len(day_chunks) < 10:
-                # Fallback if day pattern not found (wrong book format)
-                print(f"Warning: Only {len(day_chunks)} day chunks found. Falling back to generic chunking.")
-                chunk_contents = chunk_text_generic(text)
-                chunk_metadata = [{"chunk_type": "generic"} for _ in chunk_contents]
+                chunk_contents = chunk_text_generic(text, chunk_size=512, overlap=50)
+                chunk_metadata = [{"chunk_type": "word_count"} for _ in chunk_contents]
                 chunk_indices = list(range(len(chunk_contents)))
             else:
                 chunk_contents = [c["content"] for c in day_chunks]
-                chunk_metadata = [{"day_number": c["day_number"], "law_name": c["law_name"], "chunk_type": "day_entry"} for c in day_chunks]
+                chunk_metadata = [
+                    {"day_number": c["day_number"], "law_name": c["law_name"], "chunk_type": "day_entry"}
+                    for c in day_chunks
+                ]
                 chunk_indices = [c["day_number"] for c in day_chunks]
         else:
-            chunk_contents = chunk_text_generic(text)
-            chunk_metadata = [{"chunk_type": "generic"} for _ in chunk_contents]
+            chunk_contents = chunk_text_generic(text, chunk_size=512, overlap=50)
+            chunk_metadata = [{"chunk_type": "word_count"} for _ in chunk_contents]
             chunk_indices = list(range(len(chunk_contents)))
 
-        # Step 3: Embed (one at a time for Google API; batching risks rate limits)
+        # Step 3: Embed in batches (20 chunks) with 15s delay to stay under 30k TPM
+        batch_size = 20
         all_embeddings = []
-        for i, chunk in enumerate(chunk_contents):
-            embedding = embedder.embed_query(chunk)  # reuse embed_query for single texts
-            all_embeddings.append(embedding)
-            if (i + 1) % 10 == 0:
-                print(f"Embedded {i + 1}/{len(chunk_contents)} chunks...")
+        
+        for i in range(0, len(chunk_contents), batch_size):
+            batch = chunk_contents[i : i + batch_size]
+            
+            # Retry logic for 429 Resource Exhausted
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    embeddings = embedder.embed_texts(batch) # Uses native batch API
+                    all_embeddings.extend(embeddings)
+                    break
+                except Exception as e:
+                    if "429" in str(e) or "quota" in str(e).lower() or "exhausted" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep((attempt + 1) * 30)
+                            continue
+                    raise e
+            
+            if i + batch_size < len(chunk_contents):
+                await asyncio.sleep(15)
 
-        # Step 4: Clear old chunks and upsert new ones
+        # Step 4: Upsert to Vector Store
         await vector_store.delete_book_chunks(book_id)
         await vector_store.upsert_chunks(
             book_id=book_id,
@@ -1034,7 +1068,7 @@ async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chu
             chunk_indices=chunk_indices,
         )
 
-        # Step 5: Mark ready
+        # Step 5: Finalize
         supabase_admin.table("books").update({
             "ingestion_status": "ready",
             "chunk_count": len(chunk_contents),
@@ -1556,6 +1590,7 @@ async def chat(
 
 ### app/api/v1/endpoints/admin/books.py
 ```python
+import hashlib
 from uuid import UUID
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException
 from postgrest.exceptions import APIError
@@ -1573,32 +1608,53 @@ async def upload_book(
     file: UploadFile = File(...),
     title: str = "Untitled Book",
     author: str = "",
-    use_day_chunking: bool = True,
+    use_day_chunking: bool = False,
     _: dict = Depends(require_admin),
 ):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     file_bytes = await file.read()
-    storage_path = f"books/{file.filename}"
-    supabase_admin.storage.from_("book-pdfs").upload(storage_path, file_bytes)
+    
+    # Compute SHA-256 hash to prevent duplicates
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-    book = supabase_admin.table("books").insert({
+    # Check if book already exists by hash
+    existing_book = supabase_admin.table("books").select("id, title, ingestion_status").eq("file_hash", file_hash).limit(1).execute()
+    if existing_book and existing_book.data and len(existing_book.data) > 0:
+        book_data = existing_book.data[0]
+        return api_success(
+            data={
+                "book_id": book_data["id"],
+                "status": "already_exists",
+                "ingestion_status": book_data["ingestion_status"]
+            },
+            message=f"Book already exists (Title: {book_data['title']})"
+        )
+
+    # Step 1: Create DB record first (Non-blocking)
+    book_data = {
         "title": title,
         "author": author,
-        "storage_path": storage_path,
+        "file_hash": file_hash,
+        "storage_path": f"books/{file.filename}",
         "ingestion_status": "pending",
-    }).execute()
+    }
+    
+    book = supabase_admin.table("books").insert(book_data).execute()
     book_id = book.data[0]["id"]
 
+    # Step 2: Handoff storage upload and ingestion to background
     background_tasks.add_task(ingest_book, book_id, file_bytes, use_day_chunking)
 
-    data = {
-        "book_id": book_id,
-        "status": "ingestion_started",
-        "chunking_mode": "day_entry" if use_day_chunking else "word_count",
-    }
-    return api_success(data=data, message="Book upload successful, ingestion started in background")
+    return api_success(
+        data={
+            "book_id": book_id,
+            "status": "ingestion_started",
+            "chunking_mode": "word_count",
+        }, 
+        message="Book record created. Upload and ingestion continuing in background."
+    )
 
 
 @router.get("/books")
@@ -1611,7 +1667,7 @@ async def list_books(_: dict = Depends(require_admin)):
 async def trigger_ingestion(
     book_id: UUID,
     background_tasks: BackgroundTasks,
-    use_day_chunking: bool = True,
+    use_day_chunking: bool = False,
     _: dict = Depends(require_admin),
 ):
     """
@@ -1621,10 +1677,11 @@ async def trigger_ingestion(
     try:
         # Check if book exists
         result = supabase_admin.table("books").select("id, ingestion_status").eq("id", str(book_id)).limit(1).execute()
-        book = result.data
-
-        if not book:
+        
+        if not result or not result.data or len(result.data) == 0:
             raise HTTPException(status_code=404, detail="Book not found.")
+
+        book = result.data[0]
 
         # Prevent concurrent ingestion if already processing
         if book["ingestion_status"] == "processing":
@@ -1642,9 +1699,22 @@ async def trigger_ingestion(
 
 
 @router.delete("/books/{book_id}")
-async def delete_book(book_id: str, _: dict = Depends(require_admin)):
-    supabase_admin.table("books").delete().eq("id", book_id).execute()
-    return api_success(data={"deleted": True}, message="Book deleted successfully")
+async def delete_book(book_id: UUID, _: dict = Depends(require_admin)):
+    # 1. Get storage path first
+    result = supabase_admin.table("books").select("storage_path").eq("id", str(book_id)).limit(1).execute()
+    
+    if result and result.data and len(result.data) > 0:
+        storage_path = result.data[0]["storage_path"]
+        # 2. Delete from storage (don't fail if already gone)
+        try:
+            supabase_admin.storage.from_("book-pdfs").remove([storage_path])
+        except Exception:
+            pass
+
+    # 3. Delete from DB
+    supabase_admin.table("books").delete().eq("id", str(book_id)).execute()
+    
+    return api_success(data={"deleted": True}, message="Book and its storage file deleted successfully")
 ```
 
 ### app/services/plan_service.py
