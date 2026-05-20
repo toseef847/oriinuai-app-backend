@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.db.supabase import supabase, supabase_admin
+from app.db.supabase import supabase, supabase_admin, get_public_url, get_signed_url
+from app.core.config import settings
 
 bearer_scheme = HTTPBearer()
 
@@ -47,7 +48,14 @@ async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> di
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found."
         )
-    return res.data[0]
+    
+    profile = res.data[0]
+    profile["profile_image_url"] = get_signed_url(
+        settings.PROFILE_IMAGE_BUCKET, 
+        profile.get("profile_image_path"),
+        3600 * 24
+    )
+    return profile
 
 
 def require_admin(profile: dict = Depends(get_current_profile)) -> dict:
