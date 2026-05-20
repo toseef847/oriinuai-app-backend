@@ -47,36 +47,36 @@ def _portal_return_url() -> str:
 
 
 def _get_plan_record(plan_name: str) -> dict[str, Any]:
-    result = (
+    res = (
         supabase_admin.table("plans")
         .select("*")
         .eq("name", plan_name)
         .eq("is_active", True)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not result.data:
+    if not res or not res.data or len(res.data) == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plan '{plan_name}' is not available.",
         )
-    return result.data
+    return res.data[0]
 
 
 def _get_plan_record_by_id(plan_id: str) -> dict[str, Any]:
-    result = (
+    res = (
         supabase_admin.table("plans")
         .select("*")
         .eq("id", plan_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if not result.data:
+    if not res or not res.data or len(res.data) == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Plan with id '{plan_id}' is not available.",
         )
-    return result.data
+    return res.data[0]
 
 
 def _plan_priority(plan_name: str) -> int:
@@ -535,15 +535,15 @@ def _invoice_subscription_metadata(invoice: dict[str, Any]) -> dict[str, Any]:
 
 
 def _find_plan_by_price_id(price_id: str) -> dict[str, Any]:
-    result = (
+    res = (
         supabase_admin.table("plans")
         .select("*")
         .or_("stripe_monthly_price_id.eq.{},stripe_yearly_price_id.eq.{}".format(price_id, price_id))
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    if result.data:
-        return result.data
+    if res and res.data and len(res.data) > 0:
+        return res.data[0]
 
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,

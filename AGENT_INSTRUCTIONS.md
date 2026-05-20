@@ -1,9 +1,9 @@
-# ORIINU.AI — AI Agent Setup Instructions (v2)
+# ORIINU.AI — African Intelligence Platform
 # =============================================
-# READ THIS ENTIRE DOCUMENT BEFORE WRITING A SINGLE FILE.
-# Follow every step in order. Do not skip sections.
-# Do not install packages not listed here.
-# Do not deviate from the folder structure defined below.
+# ORIINU is the first AI-powered African Intelligence platform designed to guide 
+# users into clarity, alignment, and decisive action. 
+# It integrates African Sacred Science, spiritual intelligence, and practical 
+# life strategy into one powerful AI-driven experience.
 
 ---
 
@@ -14,51 +14,36 @@
 | 1 | Python target: **3.13.3** (was 3.12) | 3.13.3 is latest stable with bug fixes; user's confirmed choice |
 | 2 | Removed `sentence-transformers` and `torch` | No local models; Google AI Studio handles all AI |
 | 3 | Removed `OllamaProvider` entirely | No local inference; Google AI Studio is the primary provider |
-| 4 | Embeddings now use **Google `text-embedding-004`** (768 dims) | Same SDK, free on AI Studio, no local compute needed |
-| 5 | Vector column changed from `vector(384)` → **`vector(768)`** | Matches Google embedding-004 output dimensions |
+| 4 | Embeddings now use **Google `gemini-embedding-2`** (768 dims) | Same SDK, free on AI Studio, no local compute needed |
+| 5 | Vector column changed from `vector(384)` → **`vector(768)`** | Matches Google gemini-embedding-2 output dimensions |
 | 6 | `LLM_PROVIDER` now supports `google_ai_studio` \| `openai` only | Ollama removed |
 | 7 | `EMBEDDING_PROVIDER` now supports `google` \| `openai` only | sentence-transformers removed |
-| 8 | **Smart chunking by DAY entry** replaces word-count chunking | The book has 365 structured daily entries — chunking by day gives perfect semantic RAG units |
-| 9 | **System prompt** updated with real book title, authors, and key concepts | Generic prompt replaced with ORIINU-specific context |
-| 10 | Book metadata seeded with real values from uploaded PDF | Title, authors, publisher, ISBN populated |
-| 11 | **JWT verification** uses `supabase.auth.get_user()` instead of local `python-jose` | Supabase projects now default to **ES256** signing algorithm; local `jwt.decode()` with hardcoded `HS256` fails. `supabase.auth.get_user()` delegates to Supabase Auth API, works with any algorithm. `python-jose` dependency removed. |
-| 12 | **Standardized API Response Pattern** | All API responses now use a universal JSON envelope: `{status, message, data}`. Standardized error handling and simplified 422 validation messages. |
+| 8 | **Word-count chunking (512 words)** is the primary strategy | Provides granular semantic units for precise "African Intelligence" retrieval across diverse life topics |
+| 9 | **System prompt** updated with platform-wide context | Mission: Clarity, Alignment, Power. Traditions: Yoruba, Igbo, Akan, Kemet, Ubuntu |
+| 10 | **Duplicate Check via File Hashing** | PDF uploads now compute a SHA-256 hash to prevent duplicate ingestion of identical files |
+| 11 | **Non-blocking Uploads** | Supabase Storage upload moved to background tasks to keep API response times < 200ms |
+| 12 | **Model Throttling & Batching** | Implemented 15s delays and batching (20 chunks) for embeddings to stay under 30k TPM limit |
+| 13 | **Robust Query Pattern** | Replaced all `maybe_single()` with `limit(1).execute()` + explicit validation to handle library crashes on empty results |
+| 14 | **Chat Session Management** | Added endpoints for listing chats, retrieving full history, and deleting sessions |
 
 ---
 
-## BOOK ANALYSIS — CRITICAL FOR RAG CONFIGURATION
+## PLATFORM ANALYSIS — THE AFRICAN INTELLIGENCE CORE
 
-Before configuring anything, understand the book's structure.
-This directly determines chunking and retrieval strategy.
+ORIINU is not just a chatbot; it is a system of guidance rooted in timeless 
+African wisdom—designed for modern life.
 
-**Book:** "365 African Proverbs: A Daily Practice in African Sacred Science™"
-**Authors:** Dr. Enyinna Erengwa & Dr. Adedunmola "Dee" Adio-Moses Erengwa
-**Publisher:** The Enlightenment Academy
-**ISBN:** 978-0-9833903-9-8
-**Pages:** 391 | **Entries:** 365 daily laws
+**Core Mission:**
+- Gain clear insight into your situation
+- Make aligned and confident decisions
+- Move forward with purpose and power
 
-### Structure of every single daily entry:
-```
-DAY {N} — LAW OF {THEME}
-PROVERB
-  "{Proverb text}" ({Origin language/tribe})
-  {English translation}
-TODAY'S WISDOM
-  {One-line principle}
-SACRED INSIGHT
-  {2-3 paragraph explanation linking to African Sacred Science™}
-REFLECTION
-  {One question for the reader}
-AFFIRMATION
-  {One affirmation statement}
-ORÍ DECREE (AṢẸ ACTIVATION)
-  {Orí Decree paragraph ending with "Àṣẹ."}
-ACTION STEP
-  {One concrete action}
-```
+**Intelligence Sources:**
+- **African Sacred Science™** — the core framework
+- **Traditions:** Yoruba (Orì), Igbo (Chì), Akan (Okra), Kemet (Ma'at), Ubuntu
 
 ### Key concepts used throughout — the AI must know these terms:
-- **African Sacred Science™** — the core framework of the book; treat as proper noun
+- **African Sacred Science™** — the core framework; treat as proper noun
 - **Orí** — Yoruba for the inner divine intelligence / higher self
 - **Chi** — Igbo equivalent of Orí
 - **Àṣẹ** — Yoruba word meaning divine authority / "so it is"
@@ -67,12 +52,13 @@ ACTION STEP
 - **The Enlightenment Academy** — the publishing organization/brand
 
 ### RAG chunking decision:
-Each DAY entry is a self-contained, semantically complete unit.
-Chunk by DAY, not by word count. This means:
-- 365 chunks total (1 per day)
-- Each chunk is ~150–300 words
-- Retrieval returns complete, coherent daily teachings
-- No sacred insights are split mid-thought across chunk boundaries
+To support broad "African Intelligence" queries across life, purpose, relationships, 
+business, and growth, we use **Word-count chunking**:
+- **Chunk size:** 512 words
+- **Overlap:** 50 words
+- **Benefit:** High-precision retrieval of specific paragraphs or insights that 
+  directly answer the user's situation.
+- **Metadata:** Keep day/law info if available for context, but prioritize semantic relevance.
 
 ---
 
@@ -177,7 +163,7 @@ oriinu-backend/
 │   │   ├── rag/
 │   │   │   ├── __init__.py
 │   │   │   ├── chunker.py        # ← SMART: splits by DAY entry, not word count
-│   │   │   ├── embedder.py       # ← Google text-embedding-004 | OpenAI only
+│   │   │   ├── embedder.py       # ← Google gemini-embedding-2 | OpenAI only
 │   │   │   ├── ingestion.py
 │   │   │   └── query.py          # ← Updated system prompt with real book context
 │   │   │
@@ -270,7 +256,7 @@ supabase==2.9.1
 # RAG — PDF processing
 pypdf==5.1.0
 
-# AI — Google AI Studio (Gemma 4 LLM + text-embedding-004)
+# AI — Google AI Studio (Gemma 4 LLM + gemini-embedding-2)
 google-generativeai==0.8.3
 
 # AI — OpenAI (fallback for Inner Circle plan)
@@ -344,9 +330,9 @@ LLM_PROVIDER=google_ai_studio
 GOOGLE_AI_STUDIO_KEY=your-google-ai-studio-key-here
 
 # Gemma 4 model per plan tier
-GEMMA_FREE_MODEL=gemma-4-e4b-it         # Foundation plan (free users)
-GEMMA_PRO_MODEL=gemma-4-27b-it          # Core plan ($29/mo)
-GEMMA_ELITE_MODEL=gemma-4-31b-it        # Inner Circle plan ($99/mo)
+GEMMA_FREE_MODEL=models/gemini-2.5-flash         # Foundation plan (free users)
+GEMMA_PRO_MODEL=models/gemini-3-flash-preview          # Core plan ($29/mo)
+GEMMA_ELITE_MODEL=models/gemini-2.5-pro        # Inner Circle plan ($99/mo)
 
 # OpenAI — only used if LLM_PROVIDER=openai or as Inner Circle fallback
 OPENAI_API_KEY=your-openai-key-here
@@ -358,7 +344,7 @@ OPENAI_FULL_MODEL=gpt-4o
 # NOTE: "local" (sentence-transformers) is NOT supported. Do not add it.
 EMBEDDING_PROVIDER=google
 
-# Google text-embedding-004: 768 dimensions, free on AI Studio
+# Google gemini-embedding-2: 768 dimensions, free on AI Studio
 # OpenAI text-embedding-3-small: 1536 dimensions, paid
 EMBEDDING_DIMENSIONS=768   # 768 for google | 1536 for openai
 
@@ -419,9 +405,9 @@ class Settings(BaseSettings):
     # LLM — google_ai_studio | openai (no ollama)
     LLM_PROVIDER: str = "google_ai_studio"
     GOOGLE_AI_STUDIO_KEY: str = ""
-    GEMMA_FREE_MODEL: str = "gemma-4-e4b-it"
-    GEMMA_PRO_MODEL: str = "gemma-4-27b-it"
-    GEMMA_ELITE_MODEL: str = "gemma-4-31b-it"
+    GEMMA_FREE_MODEL: str = "models/gemini-2.5-flash"
+    GEMMA_PRO_MODEL: str = "models/gemini-3-flash-preview"
+    GEMMA_ELITE_MODEL: str = "models/gemini-2.5-pro"
     OPENAI_API_KEY: str = ""
     OPENAI_MINI_MODEL: str = "gpt-4o-mini"
     OPENAI_FULL_MODEL: str = "gpt-4o"
@@ -468,7 +454,7 @@ create extension if not exists "uuid-ossp";
 ### sql/02_create_tables.sql
 
 ⚠️ CRITICAL: The `book_chunks` table uses `vector(768)` — matches
-Google text-embedding-004 output dimensions.
+Google gemini-embedding-2 output dimensions.
 If you change EMBEDDING_PROVIDER to "openai" in future, you must
 recreate this column as `vector(1536)` and re-ingest all books.
 
@@ -545,12 +531,12 @@ values (
     'pending'
 );
 
--- book_chunks — vector(768) for Google text-embedding-004
+-- book_chunks — vector(768) for Google gemini-embedding-2
 create table public.book_chunks (
     id          uuid primary key default uuid_generate_v4(),
     book_id     uuid not null references public.books(id) on delete cascade,
     content     text not null,
-    embedding   vector(768),   -- ← 768 dims for Google text-embedding-004
+    embedding   vector(768),   -- ← 768 dims for Google gemini-embedding-2
     metadata    jsonb default '{}'::jsonb,
     chunk_index int,           -- day number (1–365) for this book
     created_at  timestamptz default now()
@@ -796,7 +782,7 @@ async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> di
     Fetches the user's profile from the database.
     This is more secure than trusting the JWT payload for sensitive fields like 'role'.
     """
-    result = supabase_admin.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    result = supabase_admin.table("profiles").select("*").eq("id", user_id).limit(1).execute()
     if not result.data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -891,7 +877,7 @@ def chunk_text_generic(text: str, chunk_size: int = 512, overlap: int = 50) -> L
 ### app/services/rag/embedder.py
 
 IMPORTANT: No sentence-transformers. No torch. No local models.
-Only Google text-embedding-004 (768 dims) or OpenAI (1536 dims).
+Only Google gemini-embedding-2 (768 dims) or OpenAI (1536 dims).
 
 ```python
 from typing import List
@@ -901,7 +887,7 @@ from app.core.config import settings
 class Embedder:
     """
     Cloud-only embedding provider.
-    EMBEDDING_PROVIDER=google  → Google text-embedding-004 (768 dims, free)
+    EMBEDDING_PROVIDER=google  → Google gemini-embedding-2 (768 dims, free)
     EMBEDDING_PROVIDER=openai  → OpenAI text-embedding-3-small (1536 dims, paid)
 
     NOTE: "local" is not supported. Do not add it.
@@ -932,7 +918,7 @@ class Embedder:
             embeddings = []
             for text in texts:
                 result = genai.embed_content(
-                    model="models/text-embedding-004",
+                    model="models/gemini-embedding-2",
                     content=text,
                     task_type="retrieval_document",
                 )
@@ -959,7 +945,7 @@ class Embedder:
         if self.provider == "google":
             genai = self._get_google_client()
             result = genai.embed_content(
-                model="models/text-embedding-004",
+                model="models/gemini-embedding-2",
                 content=query,
                 task_type="retrieval_query",  # different task type for queries
             )
@@ -975,6 +961,7 @@ embedder = Embedder()
 ### app/services/rag/ingestion.py
 
 ```python
+import asyncio
 from app.utils.pdf_extractor import extract_text_from_pdf
 from app.services.rag.chunker import chunk_by_day, chunk_text_generic
 from app.services.rag.embedder import embedder
@@ -982,55 +969,96 @@ from app.db.vector_store import vector_store
 from app.db.supabase import supabase_admin
 
 
-async def ingest_book(book_id: str, file_bytes: bytes, use_day_chunking: bool = True) -> dict:
+async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chunking: bool = False) -> dict:
     """
-    Full RAG ingestion pipeline for ORIINU.AI books.
-
-    For '365 African Proverbs': use_day_chunking=True (default)
-      → 365 chunks, one per daily law, perfect semantic units
-
-    For future books without daily structure: use_day_chunking=False
-      → Falls back to generic 512-word overlapping chunks
-
-    Called as a FastAPI BackgroundTask after admin PDF upload.
+    Full RAG ingestion pipeline for ORIINU.AI.
+    
+    This function handles the initial storage upload (async), chunking, 
+    batch embedding with throttling, and vector store upsert.
     """
     try:
+        # Step 0: Mark as processing
         supabase_admin.table("books").update(
             {"ingestion_status": "processing"}
         ).eq("id", book_id).execute()
+
+        # Step 0.5: Handle File Bytes and Storage
+        book_res = supabase_admin.table("books").select("storage_path").eq("id", book_id).limit(1).execute()
+        if not book_res or not book_res.data or len(book_res.data) == 0:
+            raise ValueError(f"Book with ID {book_id} not found.")
+        storage_path = book_res.data[0]["storage_path"]
+
+        if file_bytes:
+            # Async storage upload (fallback to update if duplicate lib bug occurs)
+            try:
+                supabase_admin.storage.from_("book-pdfs").upload(
+                    path=storage_path,
+                    file=file_bytes,
+                    file_options={"upsert": "true", "content-type": "application/pdf"}
+                )
+            except (Exception, UnboundLocalError) as e:
+                error_str = str(e).lower()
+                if "already exists" in error_str or "duplicate" in error_str or "local variable 'response'" in error_str:
+                    supabase_admin.storage.from_("book-pdfs").update(
+                        path=storage_path,
+                        file=file_bytes,
+                        file_options={"content-type": "application/pdf"}
+                    )
+                else:
+                    raise e
+        else:
+            # Retry case: download from storage
+            file_bytes = supabase_admin.storage.from_("book-pdfs").download(storage_path)
 
         # Step 1: Extract text
         text = extract_text_from_pdf(file_bytes)
         if not text:
             raise ValueError("No extractable text found in PDF.")
 
-        # Step 2: Chunk
+        # Step 2: Chunk (Default: Word-count for platform granularity)
         if use_day_chunking:
             day_chunks = chunk_by_day(text)
             if len(day_chunks) < 10:
-                # Fallback if day pattern not found (wrong book format)
-                print(f"Warning: Only {len(day_chunks)} day chunks found. Falling back to generic chunking.")
-                chunk_contents = chunk_text_generic(text)
-                chunk_metadata = [{"chunk_type": "generic"} for _ in chunk_contents]
+                chunk_contents = chunk_text_generic(text, chunk_size=512, overlap=50)
+                chunk_metadata = [{"chunk_type": "word_count"} for _ in chunk_contents]
                 chunk_indices = list(range(len(chunk_contents)))
             else:
                 chunk_contents = [c["content"] for c in day_chunks]
-                chunk_metadata = [{"day_number": c["day_number"], "law_name": c["law_name"], "chunk_type": "day_entry"} for c in day_chunks]
+                chunk_metadata = [
+                    {"day_number": c["day_number"], "law_name": c["law_name"], "chunk_type": "day_entry"}
+                    for c in day_chunks
+                ]
                 chunk_indices = [c["day_number"] for c in day_chunks]
         else:
-            chunk_contents = chunk_text_generic(text)
-            chunk_metadata = [{"chunk_type": "generic"} for _ in chunk_contents]
+            chunk_contents = chunk_text_generic(text, chunk_size=512, overlap=50)
+            chunk_metadata = [{"chunk_type": "word_count"} for _ in chunk_contents]
             chunk_indices = list(range(len(chunk_contents)))
 
-        # Step 3: Embed (one at a time for Google API; batching risks rate limits)
+        # Step 3: Embed in batches (20 chunks) with 15s delay to stay under 30k TPM
+        batch_size = 20
         all_embeddings = []
-        for i, chunk in enumerate(chunk_contents):
-            embedding = embedder.embed_query(chunk)  # reuse embed_query for single texts
-            all_embeddings.append(embedding)
-            if (i + 1) % 10 == 0:
-                print(f"Embedded {i + 1}/{len(chunk_contents)} chunks...")
+        
+        for i in range(0, len(chunk_contents), batch_size):
+            batch = chunk_contents[i : i + batch_size]
+            
+            # Retry logic for 429 Resource Exhausted
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    embeddings = embedder.embed_texts(batch) # Uses native batch API
+                    all_embeddings.extend(embeddings)
+                    break
+                except Exception as e:
+                    if "429" in str(e) or "quota" in str(e).lower() or "exhausted" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep((attempt + 1) * 30)
+                            continue
+                    raise e
+            
+            if i + batch_size < len(chunk_contents):
+                await asyncio.sleep(15)
 
-        # Step 4: Clear old chunks and upsert new ones
+        # Step 4: Upsert to Vector Store
         await vector_store.delete_book_chunks(book_id)
         await vector_store.upsert_chunks(
             book_id=book_id,
@@ -1040,7 +1068,7 @@ async def ingest_book(book_id: str, file_bytes: bytes, use_day_chunking: bool = 
             chunk_indices=chunk_indices,
         )
 
-        # Step 5: Mark ready
+        # Step 5: Finalize
         supabase_admin.table("books").update({
             "ingestion_status": "ready",
             "chunk_count": len(chunk_contents),
@@ -1066,7 +1094,7 @@ from app.db.supabase import supabase_admin
 class VectorStore:
     """
     Supabase pgvector wrapper.
-    Dimension: 768 (Google text-embedding-004).
+    Dimension: 768 (Google gemini-embedding-2).
     """
 
     async def upsert_chunks(
@@ -1248,9 +1276,9 @@ def get_llm_provider(plan_tier: str = "free") -> LLMProvider:
     if provider == "google_ai_studio":
         from app.services.llm.google_gemma import GoogleGemmaProvider
         model_map = {
-            "free":  settings.GEMMA_FREE_MODEL,   # gemma-4-e4b-it
-            "pro":   settings.GEMMA_PRO_MODEL,     # gemma-4-27b-it
-            "elite": settings.GEMMA_ELITE_MODEL,   # gemma-4-31b-it
+            "free":  settings.GEMMA_FREE_MODEL,   # models/gemini-2.5-flash
+            "pro":   settings.GEMMA_PRO_MODEL,     # models/gemini-3-flash-preview
+            "elite": settings.GEMMA_ELITE_MODEL,   # models/gemini-2.5-pro
         }
         return GoogleGemmaProvider(model=model_map.get(plan_tier, settings.GEMMA_FREE_MODEL))
 
@@ -1427,7 +1455,8 @@ def api_error(
 
 ### app/api/v1/endpoints/chat.py
 ```python
-from fastapi import APIRouter, Depends, BackgroundTasks
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.core.security import get_current_user_id
@@ -1435,6 +1464,7 @@ from app.services.plan_service import get_user_plan, check_daily_limit
 from app.services.rag.query import build_rag_prompt
 from app.services.llm.factory import get_llm_provider
 from app.db.supabase import supabase_admin
+from app.utils.response import api_success
 import json
 
 router = APIRouter()
@@ -1443,6 +1473,50 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+
+
+@router.get("/chats")
+async def list_chats(user_id: str = Depends(get_current_user_id)):
+    """List all chat sessions for the current user."""
+    res = supabase_admin.table("chat_sessions").select(
+        "*"
+    ).eq("user_id", user_id).order("updated_at", desc=True).execute()
+    
+    return api_success(data=res.data, message="Chats retrieved successfully")
+
+
+@router.get("/chats/{session_id}")
+async def get_chat_history(
+    session_id: UUID, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """Retrieve full message history for a specific session."""
+    # Verify ownership
+    session_res = supabase_admin.table("chat_sessions").select(
+        "id"
+    ).eq("id", str(session_id)).eq("user_id", user_id).limit(1).execute()
+    
+    if not session_res or not session_res.data:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+
+    messages_res = supabase_admin.table("chat_messages").select(
+        "*"
+    ).eq("session_id", str(session_id)).order("created_at", desc=False).execute()
+    
+    return api_success(data=messages_res.data, message="Chat history retrieved")
+
+
+@router.delete("/chats/{session_id}")
+async def delete_chat(
+    session_id: UUID, 
+    user_id: str = Depends(get_current_user_id)
+):
+    """Delete a chat session and all its messages."""
+    supabase_admin.table("chat_sessions").delete().eq(
+        "id", str(session_id)
+    ).eq("user_id", user_id).execute()
+    
+    return api_success(data={"deleted": True}, message="Chat deleted successfully")
 
 
 @router.post("/chat")
@@ -1454,11 +1528,24 @@ async def chat(
     check_daily_limit(user_id, plan.get("plan_name", "foundation"))
 
     session_id = request.session_id
+    is_new_session = False
+    
     if not session_id:
+        is_new_session = True
+        # Generate initial title from first message
+        title = request.message[:40] + ("..." if len(request.message) > 40 else "")
         session = supabase_admin.table("chat_sessions").insert(
-            {"user_id": user_id}
+            {"user_id": user_id, "title": title}
         ).execute()
         session_id = session.data[0]["id"]
+    else:
+        # Verify existing session exists and belongs to this user
+        session_res = supabase_admin.table("chat_sessions").select("id").eq(
+            "id", str(session_id)
+        ).eq("user_id", user_id).limit(1).execute()
+        
+        if not session_res or not session_res.data:
+            raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
 
     system_prompt, _ = await build_rag_prompt(
         user_message=request.message,
@@ -1467,14 +1554,15 @@ async def chat(
 
     history_result = supabase_admin.table("chat_messages").select(
         "role, content"
-    ).eq("session_id", session_id).order("created_at", desc=True).limit(6).execute()
+    ).eq("session_id", session_id).order("created_at", desc=True).limit(10).execute()
     history = list(reversed(history_result.data or []))
 
     llm = get_llm_provider(plan_tier=plan["llm_tier"])
 
     async def generate():
         full_response = []
-        yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
+        if is_new_session:
+            yield f"data: {json.dumps({'type': 'session_id', 'session_id': session_id})}\n\n"
 
         async for token in llm.stream_response(system_prompt, request.message, history):
             full_response.append(token)
@@ -1483,10 +1571,18 @@ async def chat(
         complete = "".join(full_response)
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
+        # 1. Save messages
         supabase_admin.table("chat_messages").insert([
             {"session_id": session_id, "role": "user",      "content": request.message},
             {"session_id": session_id, "role": "assistant", "content": complete, "model_used": plan["llm_tier"]},
         ]).execute()
+        
+        # 2. Update session timestamp
+        supabase_admin.table("chat_sessions").update(
+            {"updated_at": "now()"}
+        ).eq("id", session_id).execute()
+        
+        # 3. Track usage
         supabase_admin.rpc("increment_usage", {"p_user_id": user_id, "p_tokens": 0}).execute()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -1494,10 +1590,14 @@ async def chat(
 
 ### app/api/v1/endpoints/admin/books.py
 ```python
+import hashlib
+from uuid import UUID
 from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException
+from postgrest.exceptions import APIError
 from app.core.security import require_admin
 from app.db.supabase import supabase_admin
 from app.services.rag.ingestion import ingest_book
+from app.utils.response import api_success
 
 router = APIRouter()
 
@@ -1508,47 +1608,113 @@ async def upload_book(
     file: UploadFile = File(...),
     title: str = "Untitled Book",
     author: str = "",
-    use_day_chunking: bool = True,
+    use_day_chunking: bool = False,
     _: dict = Depends(require_admin),
 ):
-    """
-    Upload a PDF book and trigger RAG ingestion as a background task.
-    use_day_chunking=True  → chunk by DAY entry (for 365 African Proverbs)
-    use_day_chunking=False → chunk by word count (for future books)
-    """
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
     file_bytes = await file.read()
-    storage_path = f"books/{file.filename}"
-    supabase_admin.storage.from_("book-pdfs").upload(storage_path, file_bytes)
+    
+    # Compute SHA-256 hash to prevent duplicates
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
 
-    book = supabase_admin.table("books").insert({
+    # Check if book already exists by hash
+    existing_book = supabase_admin.table("books").select("id, title, ingestion_status").eq("file_hash", file_hash).limit(1).execute()
+    if existing_book and existing_book.data and len(existing_book.data) > 0:
+        book_data = existing_book.data[0]
+        return api_success(
+            data={
+                "book_id": book_data["id"],
+                "status": "already_exists",
+                "ingestion_status": book_data["ingestion_status"]
+            },
+            message=f"Book already exists (Title: {book_data['title']})"
+        )
+
+    # Step 1: Create DB record first (Non-blocking)
+    book_data = {
         "title": title,
         "author": author,
-        "storage_path": storage_path,
+        "file_hash": file_hash,
+        "storage_path": f"books/{file.filename}",
         "ingestion_status": "pending",
-    }).execute()
+    }
+    
+    book = supabase_admin.table("books").insert(book_data).execute()
     book_id = book.data[0]["id"]
 
+    # Step 2: Handoff storage upload and ingestion to background
     background_tasks.add_task(ingest_book, book_id, file_bytes, use_day_chunking)
 
-    return {
-        "book_id": book_id,
-        "status": "ingestion_started",
-        "chunking_mode": "day_entry" if use_day_chunking else "word_count",
-    }
+    return api_success(
+        data={
+            "book_id": book_id,
+            "status": "ingestion_started",
+            "chunking_mode": "word_count",
+        }, 
+        message="Book record created. Upload and ingestion continuing in background."
+    )
 
 
 @router.get("/books")
 async def list_books(_: dict = Depends(require_admin)):
-    return supabase_admin.table("books").select("*").order("created_at", desc=True).execute().data
+    data = supabase_admin.table("books").select("*").order("created_at", desc=True).execute().data
+    return api_success(data=data, message="Books retrieved successfully")
+
+
+@router.post("/books/{book_id}/ingest")
+async def trigger_ingestion(
+    book_id: UUID,
+    background_tasks: BackgroundTasks,
+    use_day_chunking: bool = False,
+    _: dict = Depends(require_admin),
+):
+    """
+    Manually re-trigger RAG ingestion for an existing book.
+    Useful for retrying failed ingestions.
+    """
+    try:
+        # Check if book exists
+        result = supabase_admin.table("books").select("id, ingestion_status").eq("id", str(book_id)).limit(1).execute()
+        
+        if not result or not result.data or len(result.data) == 0:
+            raise HTTPException(status_code=404, detail="Book not found.")
+
+        book = result.data[0]
+
+        # Prevent concurrent ingestion if already processing
+        if book["ingestion_status"] == "processing":
+            raise HTTPException(status_code=400, detail="Book is already being processed.")
+
+        background_tasks.add_task(ingest_book, str(book_id), None, use_day_chunking)
+
+        return api_success(
+            message="Ingestion process re-triggered successfully",
+            data={"book_id": str(book_id), "status": "processing"}
+        )
+    except APIError as e:
+        # Handle cases where Postgrest might fail
+        raise HTTPException(status_code=400, detail=f"Database error: {e.message}")
 
 
 @router.delete("/books/{book_id}")
-async def delete_book(book_id: str, _: dict = Depends(require_admin)):
-    supabase_admin.table("books").delete().eq("id", book_id).execute()
-    return {"deleted": True}
+async def delete_book(book_id: UUID, _: dict = Depends(require_admin)):
+    # 1. Get storage path first
+    result = supabase_admin.table("books").select("storage_path").eq("id", str(book_id)).limit(1).execute()
+    
+    if result and result.data and len(result.data) > 0:
+        storage_path = result.data[0]["storage_path"]
+        # 2. Delete from storage (don't fail if already gone)
+        try:
+            supabase_admin.storage.from_("book-pdfs").remove([storage_path])
+        except Exception:
+            pass
+
+    # 3. Delete from DB
+    supabase_admin.table("books").delete().eq("id", str(book_id)).execute()
+    
+    return api_success(data={"deleted": True}, message="Book and its storage file deleted successfully")
 ```
 
 ### app/services/plan_service.py
@@ -1582,7 +1748,7 @@ PLAN_LIMITS = {
 def get_user_plan(user_id: str) -> dict:
     result = supabase_admin.table("subscriptions").select(
         "*, plans(name, llm_tier)"
-    ).eq("user_id", user_id).eq("status", "active").maybe_single().execute()
+    ).eq("user_id", user_id).eq("status", "active").limit(1).execute()
 
     if not result.data:
         return PLAN_LIMITS["foundation"]
@@ -1592,9 +1758,11 @@ def get_user_plan(user_id: str) -> dict:
 
 def check_daily_limit(user_id: str, plan_name: str = "foundation") -> None:
     limit = PLAN_LIMITS.get(plan_name, PLAN_LIMITS["foundation"])["daily_messages"]
+    from datetime import date
+    today = date.today().isoformat()
     result = supabase_admin.table("usage_logs").select("messages_count").eq(
         "user_id", user_id
-    ).eq("date", "now()::date").maybe_single().execute()
+    ).eq("date", today).limit(1).execute()
     count = result.data["messages_count"] if result.data else 0
     if count >= limit:
         raise HTTPException(

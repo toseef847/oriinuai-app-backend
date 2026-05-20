@@ -5,7 +5,7 @@ from app.db.supabase import supabase_admin
 class VectorStore:
     """
     Supabase pgvector wrapper.
-    Dimension: 768 (Google text-embedding-004).
+    Dimension: 768 (Google gemini-embedding-2).
     """
 
     async def upsert_chunks(

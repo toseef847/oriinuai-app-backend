@@ -82,15 +82,19 @@ async def get_current_user(
     profile: dict = Depends(get_current_profile),
     auth_status: dict = Depends(get_auth_user_status),
 ):
-    subscription = (
+    sub_res = (
         supabase_admin.table("subscriptions")
         .select("*, plans(*)")
         .eq("user_id", profile["id"])
         .eq("status", "active")
-        .maybe_single()
+        .limit(1)
         .execute()
-        .data
     )
+    
+    subscription = None
+    if sub_res and sub_res.data and len(sub_res.data) > 0:
+        subscription = sub_res.data[0]
+
     profile.update(auth_status)
     return api_success(
         data={

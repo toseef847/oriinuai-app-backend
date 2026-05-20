@@ -25,3 +25,27 @@ supabase_admin: Client = create_admin_supabase_client()
 
 # Stateless auth client for login/reset flows; kept separate from admin DB access
 supabase_auth: Client = create_auth_supabase_client()
+
+
+def get_public_url(bucket: str, path: str | None) -> str | None:
+    """
+    Constructs the public URL for a file in Supabase storage.
+    Note: Only works if the bucket is public.
+    """
+    if not path:
+        return None
+    return f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
+
+
+def get_signed_url(bucket: str, path: str | None, expires_in: int = 3600) -> str | None:
+    """
+    Generates a signed URL for a file in a private Supabase bucket.
+    Default expiry is 1 hour (3600 seconds).
+    """
+    if not path:
+        return None
+    try:
+        res = supabase_admin.storage.from_(bucket).create_signed_url(path, expires_in)
+        return res.get("signedURL") or res.get("signed_url")
+    except Exception:
+        return None
