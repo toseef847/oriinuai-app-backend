@@ -125,9 +125,12 @@ async def delete_chat(
 ):
     """Delete a chat session and all its messages."""
     # Ownership is enforced via the eq("user_id", user_id) check in the delete
-    supabase_admin.table("chat_sessions").delete().eq(
+    res = supabase_admin.table("chat_sessions").delete().eq(
         "id", str(session_id)
     ).eq("user_id", user_id).execute()
+    
+    if not res or not res.data:
+        raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
     
     return api_success(data={"deleted": True}, message="Chat deleted successfully")
 

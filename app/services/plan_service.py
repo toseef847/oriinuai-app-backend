@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from app.db.supabase import supabase_admin
 from app.core.config import settings
@@ -46,7 +46,8 @@ def get_user_plan(user_id: str) -> dict:
 
 def check_daily_limit(user_id: str, plan_name: str = "foundation") -> None:
     limit = PLAN_LIMITS.get(plan_name, PLAN_LIMITS["foundation"])["daily_messages"]
-    today = date.today().isoformat()
+    
+    today = datetime.now(timezone.utc).date().isoformat()
     
     try:
         result = supabase_admin.table("usage_logs").select("messages_count").eq(
