@@ -8,6 +8,7 @@ from app.services.rag.query import build_rag_prompt
 from app.services.llm.factory import get_llm_provider
 from app.db.supabase import supabase_admin
 from app.utils.response import api_success
+from app.schemas.chat import ChatRenameRequest
 import json
 
 router = APIRouter()
@@ -47,6 +48,74 @@ async def get_chat_history(
     ).eq("session_id", str(session_id)).order("created_at", desc=False).execute()
     
     return api_success(data=messages_res.data, message="Chat history retrieved")
+
+
+@router.patch("/chats/{session_id}")
+async def rename_chat(
+    session_id: UUID,
+    request: ChatRenameRequest,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Rename a chat session."""
+    res = supabase_admin.table("chat_sessions").update(
+        {"title": request.title, "updated_at": "now()"}
+    ).eq("id", str(session_id)).eq("user_id", user_id).execute()
+    
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
+        
+    return api_success(data=res.data[0], message="Chat renamed successfully")
+
+
+@router.post("/chats/{session_id}/share")
+async def share_chat(
+    session_id: UUID,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Create a public snapshot of a chat session."""
+    # 1. Get session info and verify ownership
+    session_res = supabase_admin.table("chat_sessions").select(
+        "title"
+    ).eq("id", str(session_id)).eq("user_id", user_id).limit(1).execute()
+    
+    if not session_res or not session_res.data:
+        raise HTTPException(status_code=404, detail="Chat session not found.")
+    
+    session_title = session_res.data[0]["title"]
+
+    # 2. Get all messages for the snapshot
+    messages_res = supabase_admin.table("chat_messages").select(
+        "role, content, created_at"
+    ).eq("session_id", str(session_id)).order("created_at", desc=False).execute()
+    
+    if not messages_res.data:
+        raise HTTPException(status_code=400, detail="Cannot share an empty chat.")
+
+    # 3. Create shared snapshot
+    share_res = supabase_admin.table("shared_chats").insert({
+        "session_id": str(session_id),
+        "user_id": user_id,
+        "title": session_title,
+        "messages": messages_res.data
+    }).execute()
+    
+    return api_success(
+        data=share_res.data[0], 
+        message="Chat shared successfully"
+    )
+
+
+@router.get("/shared/{share_id}")
+async def get_shared_chat(share_id: UUID):
+    """Publicly retrieve a shared chat snapshot."""
+    res = supabase_admin.table("shared_chats").select(
+        "id, title, messages, created_at"
+    ).eq("id", str(share_id)).limit(1).execute()
+    
+    if not res or not res.data:
+        raise HTTPException(status_code=404, detail="Shared chat not found.")
+        
+    return api_success(data=res.data[0], message="Shared chat retrieved")
 
 
 @router.delete("/chats/{session_id}")
