@@ -16,7 +16,7 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str | None = None
+    session_id: UUID | None = None
 
 
 @router.get("/chats")
