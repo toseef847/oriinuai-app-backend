@@ -189,14 +189,14 @@ async def chat(
 
         # 1. Save messages
         supabase_admin.table("chat_messages").insert([
-            {"session_id": session_id, "role": "user",      "content": request.message},
-            {"session_id": session_id, "role": "assistant", "content": complete, "model_used": plan["llm_tier"]},
+            {"session_id": str(session_id), "role": "user",      "content": request.message},
+            {"session_id": str(session_id), "role": "assistant", "content": complete, "model_used": plan["llm_tier"]},
         ]).execute()
         
         # 2. Update session timestamp
         supabase_admin.table("chat_sessions").update(
             {"updated_at": "now()"}
-        ).eq("id", session_id).execute()
+        ).eq("id", str(session_id)).execute()
         
         # 3. Track usage
         supabase_admin.rpc("increment_usage", {"p_user_id": user_id, "p_tokens": 0}).execute()
