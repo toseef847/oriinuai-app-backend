@@ -84,14 +84,14 @@ class _FakeTableClient:
 
 def test_create_checkout_session_requires_price_id(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": None,
         "stripe_yearly_price_id": None,
         "is_active": True,
-    }
+    }]
     monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
     monkeypatch.setattr(stripe_service.settings, "STRIPE_SECRET_KEY", "sk_test")
     monkeypatch.setattr(stripe_service.settings, "STRIPE_CORE_MONTHLY_PRICE_ID", "")
@@ -112,14 +112,14 @@ def test_create_checkout_session_requires_price_id(monkeypatch):
 
 def test_create_checkout_session_rejects_active_subscription(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -185,14 +185,14 @@ def test_handle_webhook_event_accepts_signed_payload(monkeypatch):
             return fake_event["data"]["object"]
 
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [{"id": "row-1", "stripe_customer_id": "cus_123"}]
 
     monkeypatch.setattr(stripe_service.stripe, "Webhook", FakeStripeWebhook)
@@ -250,14 +250,14 @@ def test_handle_webhook_event_serializes_checkout_subscription_timestamps(monkey
             }
 
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
 
     monkeypatch.setattr(stripe_service.stripe, "Webhook", FakeStripeWebhook)
     monkeypatch.setattr(stripe_service.stripe, "Subscription", FakeSubscription)
@@ -311,14 +311,14 @@ def test_handle_webhook_event_maps_stripe_year_interval(monkeypatch):
             }
 
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
 
     monkeypatch.setattr(stripe_service.stripe, "Webhook", FakeStripeWebhook)
     monkeypatch.setattr(stripe_service.stripe, "Subscription", FakeSubscription)
@@ -621,14 +621,14 @@ def test_handle_webhook_event_cancels_subscription_without_price_id(monkeypatch)
 
 def test_create_checkout_session_uses_env_price_fallback(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": None,
         "stripe_yearly_price_id": None,
         "is_active": True,
-    }
+    }]
     monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
     monkeypatch.setattr(stripe_service.settings, "STRIPE_SECRET_KEY", "sk_test")
     monkeypatch.setattr(
@@ -660,14 +660,14 @@ def test_create_checkout_session_uses_env_price_fallback(monkeypatch):
 
 def test_change_subscription_plan_uses_checkout_for_foundation_users(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -712,16 +712,16 @@ def test_change_subscription_plan_uses_checkout_for_foundation_users(monkeypatch
     assert captured["metadata"]["billing_interval"] == "yearly"
 
 
-def test_change_subscription_plan_upgrades_paid_subscription_in_place(monkeypatch):
+def test_change_subscription_plan_upgrades_paid_subscription_via_portal(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -740,57 +740,17 @@ def test_change_subscription_plan_upgrades_paid_subscription_in_place(monkeypatc
 
     captured = {}
 
-    class FakeSubscription:
+    class FakePortalSession:
         @staticmethod
-        def retrieve(subscription_id):
-            assert subscription_id == "sub_123"
-            return {
-                "id": "sub_123",
-                "customer": "cus_123",
-                "status": "active",
-                "current_period_end": 1712592000,
-                "items": {
-                    "data": [
-                        {
-                            "id": "si_123",
-                            "price": {
-                                "id": "price_monthly",
-                                "recurring": {"interval": "month"},
-                            },
-                        }
-                    ]
-                },
-                "metadata": {"user_id": "user-1"},
-            }
-
-        @staticmethod
-        def modify(subscription_id, **kwargs):
-            assert subscription_id == "sub_123"
+        def create(**kwargs):
             captured.update(kwargs)
-            return {
-                "id": "sub_123",
-                "customer": "cus_123",
-                "status": "active",
-                "current_period_end": 1715184000,
-                "items": {
-                    "data": [
-                        {
-                            "id": "si_123",
-                            "price": {
-                                "id": "price_yearly",
-                                "recurring": {"interval": "year"},
-                            },
-                        }
-                    ]
-                },
-                "metadata": {
-                    "user_id": "user-1",
-                    "plan_name": "core",
-                    "billing_interval": "yearly",
-                },
-            }
+            return type(
+                "Session",
+                (),
+                {"url": "https://billing.test/session", "id": "bps_test"},
+            )()
 
-    monkeypatch.setattr(stripe_service.stripe, "Subscription", FakeSubscription)
+    monkeypatch.setattr(stripe_service.stripe.billing_portal, "Session", FakePortalSession)
 
     result = stripe_service.change_subscription_plan(
         user_id="user-1",
@@ -799,30 +759,24 @@ def test_change_subscription_plan_upgrades_paid_subscription_in_place(monkeypatc
         billing_interval="yearly",
     )
 
-    assert result["kind"] == "subscription_updated"
-    assert result["stripe_subscription_id"] == "sub_123"
-    assert result["status"] == "active"
-    assert result["plan_name"] == "core"
-    assert result["billing_interval"] == "yearly"
-    assert captured["items"][0]["price"] == "price_yearly"
-    assert captured["proration_behavior"] == "always_invoice"
-    assert captured["payment_behavior"] == "error_if_incomplete"
-    assert captured["metadata"]["plan_name"] == "core"
-    assert captured["metadata"]["billing_interval"] == "yearly"
-    assert fake_client.last_query_by_name["subscriptions"].last_payload["plan_id"] == "plan-core"
-    assert fake_client.last_query_by_name["subscriptions"].last_payload["billing_interval"] == "yearly"
+    assert result["kind"] == "checkout"
+    assert result["checkout_url"] == "https://billing.test/session"
+    assert result["session_id"] == "bps_test"
+    assert captured["customer"] == "cus_123"
+    assert captured["flow_data"]["type"] == "subscription_update"
+    assert captured["flow_data"]["subscription_update"]["subscription"] == "sub_123"
 
 
 def test_change_subscription_plan_allows_higher_tier_across_intervals(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-inner",
         "name": "inner_circle",
         "display_name": "Inner Circle",
         "stripe_monthly_price_id": "price_inner_monthly",
         "stripe_yearly_price_id": "price_inner_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -841,57 +795,17 @@ def test_change_subscription_plan_allows_higher_tier_across_intervals(monkeypatc
 
     captured = {}
 
-    class FakeSubscription:
+    class FakePortalSession:
         @staticmethod
-        def retrieve(subscription_id):
-            assert subscription_id == "sub_123"
-            return {
-                "id": "sub_123",
-                "customer": "cus_123",
-                "status": "active",
-                "current_period_end": 1712592000,
-                "items": {
-                    "data": [
-                        {
-                            "id": "si_123",
-                            "price": {
-                                "id": "price_core_yearly",
-                                "recurring": {"interval": "year"},
-                            },
-                        }
-                    ]
-                },
-                "metadata": {"user_id": "user-1"},
-            }
-
-        @staticmethod
-        def modify(subscription_id, **kwargs):
-            assert subscription_id == "sub_123"
+        def create(**kwargs):
             captured.update(kwargs)
-            return {
-                "id": "sub_123",
-                "customer": "cus_123",
-                "status": "active",
-                "current_period_end": 1715184000,
-                "items": {
-                    "data": [
-                        {
-                            "id": "si_123",
-                            "price": {
-                                "id": "price_inner_monthly",
-                                "recurring": {"interval": "month"},
-                            },
-                        }
-                    ]
-                },
-                "metadata": {
-                    "user_id": "user-1",
-                    "plan_name": "inner_circle",
-                    "billing_interval": "monthly",
-                },
-            }
+            return type(
+                "Session",
+                (),
+                {"url": "https://billing.test/session", "id": "bps_test"},
+            )()
 
-    monkeypatch.setattr(stripe_service.stripe, "Subscription", FakeSubscription)
+    monkeypatch.setattr(stripe_service.stripe.billing_portal, "Session", FakePortalSession)
 
     result = stripe_service.change_subscription_plan(
         user_id="user-1",
@@ -900,25 +814,23 @@ def test_change_subscription_plan_allows_higher_tier_across_intervals(monkeypatc
         billing_interval="monthly",
     )
 
-    assert result["kind"] == "subscription_updated"
-    assert result["plan_name"] == "inner_circle"
-    assert result["billing_interval"] == "monthly"
-    assert captured["items"][0]["price"] == "price_inner_monthly"
-    assert captured["proration_behavior"] == "always_invoice"
-    assert fake_client.last_query_by_name["subscriptions"].last_payload["plan_id"] == "plan-inner"
-    assert fake_client.last_query_by_name["subscriptions"].last_payload["billing_interval"] == "monthly"
+    assert result["kind"] == "checkout"
+    assert result["checkout_url"] == "https://billing.test/session"
+    assert captured["customer"] == "cus_123"
+    assert captured["flow_data"]["type"] == "subscription_update"
+
 
 
 def test_change_subscription_plan_rejects_downgrades(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -960,14 +872,14 @@ def test_change_subscription_plan_rejects_downgrades(monkeypatch):
 
 def test_change_subscription_plan_rejects_same_tier_same_interval(monkeypatch):
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "sub-row-1",
@@ -1063,14 +975,14 @@ def test_handle_webhook_event_updates_subscription_and_logs_invoice_payment(monk
             }
 
     fake_client = _FakeTableClient()
-    fake_client.responses["plans"] = {
+    fake_client.responses["plans"] = [{
         "id": "plan-core",
         "name": "core",
         "display_name": "Core",
         "stripe_monthly_price_id": "price_monthly",
         "stripe_yearly_price_id": "price_yearly",
         "is_active": True,
-    }
+    }]
     fake_client.responses["subscriptions"] = [
         {
             "id": "row-1",

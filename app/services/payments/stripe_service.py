@@ -383,57 +383,27 @@ def change_subscription_plan(
             detail=detail,
         )
 
-    stripe_subscription = stripe.Subscription.retrieve(stripe_subscription_id)
-    subscription_item_id = _subscription_item_id(stripe_subscription)
-
-    try:
-        updated_subscription = stripe.Subscription.modify(
-            stripe_subscription_id,
-            items=[{"id": subscription_item_id, "price": price_id}],
-            proration_behavior="always_invoice",
-            payment_behavior="error_if_incomplete",
-            metadata={
-                "user_id": user_id,
-                "plan_name": target_plan["name"],
-                "billing_interval": billing_interval,
+    # Redirect to the Customer Portal for the upgrade to avoid silent charges.
+    session = stripe.billing_portal.Session.create(
+        customer=current_subscription["stripe_customer_id"],
+        return_url=_portal_return_url(),
+        flow_data={
+            "type": "subscription_update",
+            "subscription_update": {
+                "subscription": stripe_subscription_id,
             },
-        )
-    except stripe.error.CardError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Your payment method could not be charged for the upgrade."
-            ),
-        ) from exc
-    except stripe.error.InvalidRequestError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Stripe rejected the subscription upgrade request."
-            ),
-        ) from exc
-    except stripe.error.StripeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Unable to complete the subscription upgrade right now."
-            ),
-        ) from exc
-
-    _upsert_subscription_row(updated_subscription)
+        },
+    )
 
     return {
-        "kind": "subscription_updated",
-        "stripe_subscription_id": stripe_subscription_id,
-        "status": _map_subscription_status(updated_subscription.get("status", "active")),
-        "plan_name": plan_name,
-        "billing_interval": billing_interval,
-        "current_period_end": _timestamp_to_iso(
-            updated_subscription.get("current_period_end")
-        ),
+        "kind": "checkout",
+        "checkout_url": session.url,
+        "session_id": session.id,
+        "plan": {
+            "id": target_plan["id"],
+            "name": target_plan["name"],
+            "display_name": target_plan["display_name"],
+        },
     }
 
 
