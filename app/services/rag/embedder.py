@@ -13,6 +13,7 @@ class Embedder:
 
     def __init__(self):
         self.provider = settings.EMBEDDING_PROVIDER
+        self.dimensions = settings.EMBEDDING_DIMENSIONS
         self._google_client = None
         self._openai_client = None
 
@@ -38,7 +39,7 @@ class Embedder:
                 model="models/gemini-embedding-2",
                 content=texts,
                 task_type="retrieval_document",
-                output_dimensionality=768,
+                output_dimensionality=self.dimensions,
             )
             # When 'content' is a list, 'embedding' is a list of vectors
             return result["embedding"]
@@ -66,7 +67,7 @@ class Embedder:
                 model="models/gemini-embedding-2",
                 content=query,
                 task_type="retrieval_query",
-                output_dimensionality=768,
+                output_dimensionality=self.dimensions,
             )
             return result["embedding"]
         else:
