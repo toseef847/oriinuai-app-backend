@@ -20,14 +20,60 @@ class ChatRequest(BaseModel):
 
 
 @router.get("/chats")
-async def list_chats(user_id: str = Depends(get_current_user_id)):
-    """List all chat sessions for the current user."""
+async def list_chats(
+    page: int = 1,
+    page_size: int = 20,
+    user_id: str = Depends(get_current_user_id)
+):
+    """List chat sessions for the current user with pagination."""
     client = await get_async_admin_client()
+    
+    start = (page - 1) * page_size
+    end = start + page_size - 1
+    
     res = await client.table("chat_sessions").select(
         "*"
-    ).eq("user_id", user_id).order("updated_at", desc=True).execute()
+    ).eq("user_id", user_id).order("updated_at", desc=True).range(start, end).execute()
     
-    return api_success(data=res.data, message="Chats retrieved successfully")
+    return api_success(
+        data={
+            "items": res.data,
+            "page": page,
+            "page_size": page_size,
+            "has_more": len(res.data) == page_size
+        }, 
+        message="Chats retrieved successfully"
+    )
+
+
+@router.get("/chats/search")
+async def search_chats(
+    q: str,
+    page: int = 1,
+    page_size: int = 20,
+    user_id: str = Depends(get_current_user_id)
+):
+    """Search chat sessions by title or message content."""
+    client = await get_async_admin_client()
+    
+    offset = (page - 1) * page_size
+    
+    res = await client.rpc("search_chat_sessions", {
+        "p_user_id": user_id,
+        "p_query": q,
+        "p_limit": page_size,
+        "p_offset": offset
+    }).execute()
+    
+    return api_success(
+        data={
+            "items": res.data,
+            "page": page,
+            "page_size": page_size,
+            "has_more": len(res.data) == page_size
+        }, 
+        message="Search results retrieved"
+    )
 
 
 @router.get("/chats/{session_id}")
