@@ -1,5 +1,5 @@
 from typing import List
-from app.db.supabase import supabase_admin
+from app.db.supabase import get_async_admin_client
 
 
 class VectorStore:
@@ -18,6 +18,8 @@ class VectorStore:
     ) -> None:
         metadata_list = metadata_list or [{} for _ in chunks]
         chunk_indices = chunk_indices or list(range(len(chunks)))
+        
+        client = await get_async_admin_client()
 
         rows = [
             {
@@ -30,7 +32,7 @@ class VectorStore:
             for chunk, embedding, meta, idx in zip(chunks, embeddings, metadata_list, chunk_indices)
         ]
         for i in range(0, len(rows), 50):
-            supabase_admin.table("book_chunks").insert(rows[i:i+50]).execute()
+            await client.table("book_chunks").insert(rows[i:i+50]).execute()
 
     async def similarity_search(
         self,
@@ -38,7 +40,8 @@ class VectorStore:
         top_k: int = 5,
         book_id: str = None,
     ) -> List[dict]:
-        result = supabase_admin.rpc(
+        client = await get_async_admin_client()
+        result = await client.rpc(
             "match_chunks",
             {
                 "query_embedding": query_embedding,
@@ -49,7 +52,8 @@ class VectorStore:
         return result.data or []
 
     async def delete_book_chunks(self, book_id: str) -> None:
-        supabase_admin.table("book_chunks").delete().eq("book_id", book_id).execute()
+        client = await get_async_admin_client()
+        await client.table("book_chunks").delete().eq("book_id", book_id).execute()
 
 
 vector_store = VectorStore()
