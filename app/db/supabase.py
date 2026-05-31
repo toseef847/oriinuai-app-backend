@@ -1,4 +1,4 @@
-from supabase import Client, ClientOptions, create_client
+from supabase import Client, ClientOptions, create_client, create_async_client, AsyncClient
 from app.core.config import settings
 
 def create_public_supabase_client() -> Client:
@@ -25,6 +25,22 @@ supabase_admin: Client = create_admin_supabase_client()
 
 # Stateless auth client for login/reset flows; kept separate from admin DB access
 supabase_auth: Client = create_auth_supabase_client()
+
+
+_async_supabase_admin: AsyncClient | None = None
+
+async def get_async_admin_client() -> AsyncClient:
+    """
+    Returns a singleton async Supabase admin client.
+    """
+    global _async_supabase_admin
+    if _async_supabase_admin is None:
+        _async_supabase_admin = await create_async_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_SERVICE_ROLE_KEY,
+            options=ClientOptions(postgrest_client_timeout=20)
+        )
+    return _async_supabase_admin
 
 
 def get_public_url(bucket: str, path: str | None) -> str | None:
