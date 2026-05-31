@@ -24,7 +24,10 @@
 | 11 | **Non-blocking Uploads** | Supabase Storage upload moved to background tasks to keep API response times < 200ms |
 | 12 | **Model Throttling & Batching** | Implemented 15s delays and batching (20 chunks) for embeddings to stay under 30k TPM limit |
 | 13 | **Robust Query Pattern** | Replaced all `maybe_single()` with `limit(1).execute()` + explicit validation to handle library crashes on empty results |
-| 14 | **Chat Session Management** | Added endpoints for listing chats, retrieving full history, and deleting sessions |
+| 14 | **Advanced Chat Features** | Added endpoints for listing chats (paginated), searching sessions (titles + content), message editing, response refinement, and deleting sessions |
+| 15 | **Enhanced Profiles** | Added bio and profile image support to user profiles; images stored in dedicated Supabase bucket |
+| 16 | **Shared Chats** | Implemented public snapshots of chat sessions via the `shared_chats` table |
+| 17 | **Robust Auth Flow** | Implemented full OTP-based auth for verification and password resets, plus token refresh |
 
 ---
 
@@ -197,7 +200,12 @@ oriinu-backend/
 │   ├── 02_create_tables.sql
 │   ├── 03_create_rpc_functions.sql
 │   ├── 04_row_level_security.sql
-│   └── 05_triggers.sql
+│   ├── 05_triggers.sql
+│   ├── 06_password_resets.sql
+│   ├── 07_add_profile_bio_image.sql
+│   ├── 08_add_book_hash.sql
+│   ├── 09_shared_chats.sql
+│   └── 10_search_chats.sql
 │
 ├── tests/
 │   ├── __init__.py
@@ -1887,13 +1895,11 @@ curl http://localhost:8000/health
 
 ## WHAT TO BUILD NEXT (ordered by priority)
 
-1. `app/api/v1/endpoints/auth.py` — GET /auth/me (returns profile + active plan)
-2. `app/api/v1/endpoints/plans.py` — GET /plans (lists plans for frontend plan selection page)
-3. `app/api/v1/endpoints/users.py` — GET /users/me/usage (today's usage vs. limit)
-4. `app/api/v1/endpoints/admin/users.py` — list users, update role, suspend account
-5. `app/api/v1/endpoints/admin/insights.py` — usage stats, revenue summary, active users per plan
-6. `scripts/ingest_book.py` — CLI script to ingest the 365 Proverbs PDF directly
-7. `tests/unit/test_chunker.py` — assert 365 chunks found, assert Day 1 content correct
+1. `app/api/v1/endpoints/admin/users.py` — Update role, suspend account
+2. `app/api/v1/endpoints/admin/insights.py` — Active users per plan, revenue summary
+3. `scripts/ingest_book.py` — CLI script to ingest the 365 Proverbs PDF directly
+4. `tests/integration/test_chat_flow.py` — Full integration test for chat -> edit -> refine -> share
+5. Enhanced PDF processing: Handle multi-column layouts and tables in future books
 
 ### Payments implementation notes
 
@@ -1901,3 +1907,4 @@ curl http://localhost:8000/health
 - Checkout price resolution is database-first: `public.plans.stripe_monthly_price_id` and `public.plans.stripe_yearly_price_id` are preferred.
 - If a plan row is missing a price ID, the backend may fall back to the matching Stripe env var until the database is seeded.
 - Webhooks verify Stripe signatures and sync subscription and payment records into Supabase.
+Supabase.
