@@ -46,10 +46,37 @@ def login_user(email: str, password: str) -> dict:
                 "password": password,
             }
         )
+
+        # Reset admin auth header in case sign_in_with_password corrupted it
+        from app.core.config import settings
+        supabase_admin.options.headers["Authorization"] = f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
+
+        if not result.user or not result.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid email or password.",
+            )
+
+        # Check if user is blocked
+        profile_res = (
+            supabase_admin.table("profiles")
+            .select("is_blocked")
+            .eq("id", result.user.id)
+            .limit(1)
+            .execute()
+        )
+        if profile_res and profile_res.data and profile_res.data[0].get("is_blocked"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has been blocked. Contact support for assistance.",
+            )
+
         return {
             "user": result.user.dict(exclude_none=True) if result.user else None,
             "session": result.session.dict(exclude_none=True) if result.session else None,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
