@@ -20,9 +20,13 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - **Robust Query Pattern**: Always use `.limit(1).execute()` instead of `.maybe_single()` to handle PostgREST 204 errors safely.
 - **Advanced Interaction**: Utilize the `_stream_chat_response` helper for all LLM interactions, including message edits and response refinements.
 - Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS.md`
+- **Admin API Pattern**: All admin endpoints under `app/api/v1/endpoints/admin/` use `require_admin` or `get_admin_profile` from `app/core/security.py` for authentication.
+- **Admin Auth Service**: Admin-specific auth lives in `app/services/auth/admin_auth_service.py` with email/password login, OTP-based password reset, and profile management.
+- **User Blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403.
+- **Admin Auth Header Reset**: After any `verify_otp` or `sign_in_with_password` call, call `_reset_admin_auth_header()` to restore service role key on `supabase_admin` client.
 
 **Key Areas**:
-- API endpoints in `app/api/v1/endpoints/`
+- API endpoints in `app/api/v1/endpoints/` (user) and `app/api/v1/endpoints/admin/` (admin)
 - Business logic in `app/services/`
 - Database operations in `app/db/`
 - Configuration in `app/core/`
@@ -32,7 +36,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/10_search_chats.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/11_create_admin_logs_table.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables
@@ -50,19 +54,22 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - `usage_logs` - Daily usage tracking
 - `payments` - Stripe invoice payment history
 - `password_resets` - One-time password reset tokens (15min expiry)
+- `admins` - Admin user profiles (separate from user profiles; includes `is_blocked`)
+- `admin_logs` - Audit log for admin actions
 
 ### 3. RAG Agent
 **Purpose**: Retrieval-Augmented Generation system management for the African Intelligence Platform
 
 **Instructions**:
 - Chunking: Default to word-count chunking (512 words, 50 overlap) for high-precision retrieval
-- System prompt: Emphasize Clarity, Alignment, and Power mission
+- System prompt: Emphasize Clarity, Alignment, and Power mission; includes **META-AWARENESS & IDENTITY PERMISSION** allowing ORIINU to answer general intro questions about itself and traditions without RAG context
 - Traditions: Yoruba (Orì), Igbo (Chì), Akan (Okra), Kemet (Ma'at), Ubuntu
 - Terminology: Always use African Sacred Science™ terminology correctly
 - Embeddings: Google gemini-embedding-2 (768 dimensions)
 - **Throttling**: Must use 15s delays between batches of 20 chunks during ingestion to stay under 30k TPM limit.
 - Vector search: Cosine similarity via pgvector
 - Avoid: Large, monolithic chunks that dilute context relevance
+- **STRICT ADVICE BOUNDARY**: Personal/life guidance must be grounded exclusively in RAG context; general platform/tradition questions can use internal knowledge
 
 **Key Concepts to Know**:
 - African Sacred Science™ (proper noun with ™)
@@ -83,6 +90,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Test API endpoints with proper authentication
 - Validate environment variable parsing
 - Check CORS configuration
+- Admin test fixtures live in `tests/integration/conftest.py` (shared `admin_token` fixture)
 
 **Test Commands**:
 ```bash
@@ -106,6 +114,7 @@ pytest --cov=app --cov-report=html
 - Environment variables from `.env` file
 - Redis for rate limiting (optional for dev)
 - Supabase for database and storage
+- **Vercel deployment**: Entry point is `api/index.py` which re-exports `app.main.app`; configured via `vercel.json` with `@vercel/python` builder
 
 **Development Setup**:
 ```bash
@@ -181,29 +190,59 @@ Required for development:
 - `FRONTEND_URL` (for Stripe checkout and billing portal redirects)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments; price IDs should live in `public.plans` first)
 - `REDIS_URL` (for rate limiting, optional)
+- `ADMIN_IMAGE_BUCKET` (optional, defaults to `PROFILE_IMAGE_BUCKET`)
 
 ## Key Files & Directories
 
 ```
 app/
-├── main.py              # FastAPI entry point + global exception handlers for standardized responses
+├── main.py              # FastAPI entry point + global exception handlers for standardized responses; CORS with allow_credentials=False
 ├── core/config.py       # Environment configuration
-├── core/security.py     # Auth deps: uses supabase.auth.get_user()
-├── db/supabase.py       # Database client setup
+├── core/security.py     # Auth deps: get_current_profile (now checks is_blocked), get_admin_profile, require_admin
+├── db/supabase.py       # Database client setup (supabase, supabase_admin, supabase_auth)
 ├── utils/
 │   └── response.py      # Standardized API response helpers (api_success, api_error)
 ├── services/            # Business logic
 │   ├── auth/
-│   │   ├── auth_service.py  # Auth functions (signup, login, OTP verify, password reset)
-│   │   └── reset_store.py   # Password reset token CRUD via DB
+│   │   ├── auth_service.py      # User auth (signup, login, OTP verify, password reset)
+│   │   ├── admin_auth_service.py # Admin auth (email/password login, OTP reset, profile mgmt)
+│   │   └── reset_store.py       # Password reset token CRUD via DB
 │   ├── rag/            # RAG system (chunking, embedding, query)
 │   ├── llm/            # LLM providers (Google, OpenAI)
 │   └── plan_service.py # Subscription plan logic
-└── api/v1/endpoints/   # API route handlers
-    └── auth.py         # Auth endpoints, incl. /me with email_verified/phone_verified
+└── api/v1/
+    ├── router.py        # Main API v1 router (includes admin router)
+    └── endpoints/
+        ├── auth.py      # User auth endpoints
+        ├── chat.py
+        ├── plans.py
+        ├── payments.py
+        ├── users.py
+        └── admin/
+            ├── __init__.py
+            ├── router.py     # Admin router aggregator
+            ├── auth.py       # Admin auth endpoints (login, forgot-password, reset, /me)
+            ├── profile.py    # Admin profile management (unified PUT endpoint)
+            ├── books.py      # Books dashboard, listing, upload, ingest, publish, delete
+            ├── users.py      # User list (rich fields), block/unblock, bulk operations
+            ├── insights.py   # Dashboard analytics (totals, earnings, plan distribution)
+            ├── plans.py      # Admin plan listing
+            └── transactions.py  # Payment/subscription transaction listing
+
+api/
+├── index.py             # Vercel entry point (re-exports app.main.app)
+vercel.json              # Vercel deployment config (@vercel/python)
 
 sql/                     # Database migrations (numbered)
-tests/                   # Test suites
+tests/
+├── unit/                # Unit tests
+└── integration/         # Integration tests
+    ├── conftest.py           # Shared admin fixtures (admin_token)
+    ├── test_admin_auth.py    # Admin auth flow tests
+    ├── test_admin_users.py   # User management (list, block, bulk) tests
+    ├── test_admin_books.py   # Books management tests
+    ├── test_admin_insights.py # Dashboard analytics tests
+    └── test_admin_transactions.py # Transaction listing tests
 scripts/                 # Utility scripts
 ```
 
@@ -213,6 +252,16 @@ scripts/                 # Utility scripts
 - `/forgot-password` sends OTP; `/verify-forgot-password` validates OTP → stores `password_resets` row → returns custom `access_token`; `/reset-password` consumes that token and updates password via admin API
 - Login JWT sessions must NEVER substitute for OTP-based reset tokens
 - **Critical**: `supabase_admin.options.headers` is the SAME dict object as `supabase_admin.auth._headers`. Auth operations that return a session (`sign_up`, `sign_in_with_password`, `verify_otp`) trigger `SIGNED_IN` → `_listen_to_auth_events` → the `Authorization` header gets replaced with the user's JWT. Before any admin API call (`admin.update_user_by_id`), the header MUST be reset: `supabase_admin.options.headers["Authorization"] = f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"`
+
+### Admin Auth Architecture
+
+- **Separate `admins` table**: Dedicated table (not `profiles`) with `is_blocked` support
+- **Email/password login**: Admin login uses `sign_in_with_password()` (no OTP for login)
+- **Password reset**: OTP-based via `reset_password_for_email()` + `verify_otp(type: "recovery")`; same token store pattern as user flow
+- **No email enumeration**: Login always returns "Invalid email or password" regardless of whether email exists; forgot-password always returns success even for non-existent admins
+- **Admin profile management**: Unified `PUT /admin/profile` endpoint (multipart/form-data) handles name, bio, image upload, and password change in one request; returns `updates_applied` list
+- **User blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403; admin blocking endpoints at `/admin/users/{id}/block` and `/admin/users/{id}/unblock`
+- **Admin and user images**: Admin images stored at `/admins/{admin_id}/` in storage bucket (separate from user profile images at `/profile-images/`)
 
 ## Communication Guidelines
 
