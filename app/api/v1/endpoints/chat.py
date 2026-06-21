@@ -122,7 +122,9 @@ async def rename_chat(
 #     user_id: str = Depends(get_current_user_id)
 # ):
 #     """Create a public snapshot of a chat session."""
+    
 #     client = await get_async_admin_client()
+    
 #     # 1. Get session info and verify ownership
 #     session_res = await client.table("chat_sessions").select(
 #         "title"
