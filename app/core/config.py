@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "ORIINU.AI"
     DEBUG: bool = False
-    ALLOWED_ORIGINS: str = "http://localhost:3000"
+    ALLOWED_ORIGINS: str = "*"
     FRONTEND_URL: str = "http://localhost:3000"
     STRIPE_CHECKOUT_SUCCESS_PATH: str = "/billing/success"
     STRIPE_CHECKOUT_CANCEL_PATH: str = "/billing/cancel"

@@ -18,7 +18,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Database access only through `app/db/` and `app/services/`
 - Use Row Level Security (RLS) for all Supabase queries
 - **Robust Query Pattern**: Always use `.limit(1).execute()` instead of `.maybe_single()` to handle PostgREST 204 errors safely.
-- For billing, treat `public.plans.stripe_monthly_price_id` and `public.plans.stripe_yearly_price_id` as the source of truth; Stripe env price IDs are fallback bootstrap values only
+- **Advanced Interaction**: Utilize the `_stream_chat_response` helper for all LLM interactions, including message edits and response refinements.
 - Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS.md`
 
 **Key Areas**:
@@ -27,28 +27,26 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Database operations in `app/db/`
 - Configuration in `app/core/`
 
-**Important**:
-- Auth uses OTP flows (signup confirmation, forgot-password recovery) — never URL-based tokens
-- `supabase_admin.options.headers` shares the same dict as `supabase_admin.auth._headers`; always reset the Authorization header to `Bearer {service_role_key}` before admin API calls
-
 ### 2. Database Agent
 **Purpose**: Database schema management and SQL operations
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/06_password_resets.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/10_search_chats.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables
+- **Search Logic**: Use the `search_chat_sessions` RPC for cross-table searching of titles and messages.
 
 **Key Tables**:
-- `profiles` - User profiles
+- `profiles` - User profiles (includes `bio` and `profile_image_path`)
 - `plans` - Subscription plans and Stripe price IDs
 - `subscriptions` - User plan assignments
 - `books` - Book metadata (includes `file_hash` for duplicate check)
 - `book_chunks` - Vectorized content chunks
 - `chat_sessions` - Chat conversation sessions (includes `title` and `updated_at` for sorting)
 - `chat_messages` - Individual messages
+- `shared_chats` - Public snapshots of chat sessions
 - `usage_logs` - Daily usage tracking
 - `payments` - Stripe invoice payment history
 - `password_resets` - One-time password reset tokens (15min expiry)

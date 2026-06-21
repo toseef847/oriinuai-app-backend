@@ -383,57 +383,27 @@ def change_subscription_plan(
             detail=detail,
         )
 
-    stripe_subscription = stripe.Subscription.retrieve(stripe_subscription_id)
-    subscription_item_id = _subscription_item_id(stripe_subscription)
-
-    try:
-        updated_subscription = stripe.Subscription.modify(
-            stripe_subscription_id,
-            items=[{"id": subscription_item_id, "price": price_id}],
-            proration_behavior="always_invoice",
-            payment_behavior="error_if_incomplete",
-            metadata={
-                "user_id": user_id,
-                "plan_name": target_plan["name"],
-                "billing_interval": billing_interval,
+    # Redirect to the Customer Portal for the upgrade to avoid silent charges.
+    session = stripe.billing_portal.Session.create(
+        customer=current_subscription["stripe_customer_id"],
+        return_url=_portal_return_url(),
+        flow_data={
+            "type": "subscription_update",
+            "subscription_update": {
+                "subscription": stripe_subscription_id,
             },
-        )
-    except stripe.error.CardError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Your payment method could not be charged for the upgrade."
-            ),
-        ) from exc
-    except stripe.error.InvalidRequestError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Stripe rejected the subscription upgrade request."
-            ),
-        ) from exc
-    except stripe.error.StripeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=(
-                getattr(exc, "user_message", None)
-                or "Unable to complete the subscription upgrade right now."
-            ),
-        ) from exc
-
-    _upsert_subscription_row(updated_subscription)
+        },
+    )
 
     return {
-        "kind": "subscription_updated",
-        "stripe_subscription_id": stripe_subscription_id,
-        "status": _map_subscription_status(updated_subscription.get("status", "active")),
-        "plan_name": plan_name,
-        "billing_interval": billing_interval,
-        "current_period_end": _timestamp_to_iso(
-            updated_subscription.get("current_period_end")
-        ),
+        "kind": "checkout",
+        "checkout_url": session.url,
+        "session_id": session.id,
+        "plan": {
+            "id": target_plan["id"],
+            "name": target_plan["name"],
+            "display_name": target_plan["display_name"],
+        },
     }
 
 
@@ -551,13 +521,34 @@ def _find_plan_by_price_id(price_id: str) -> dict[str, Any]:
     )
 
 
-def _upsert_subscription_row(subscription: dict[str, Any]) -> dict[str, Any]:
-    metadata = subscription.get("metadata") or {}
-    user_id = metadata.get("user_id")
+def _upsert_subscription_row(subscription: Any, user_id_override: str | None = None) -> dict[str, Any]:
+    # Handle both Stripe objects and dicts
+    sub_data = subscription if isinstance(subscription, dict) else getattr(subscription, "to_dict", lambda: {})()
+    if not sub_data and hasattr(subscription, "id"):
+        # Fallback for Stripe objects if to_dict failed or returned empty
+        sub_data = {
+            "id": getattr(subscription, "id", None),
+            "customer": getattr(subscription, "customer", None),
+            "status": getattr(subscription, "status", None),
+            "current_period_end": getattr(subscription, "current_period_end", None),
+            "metadata": getattr(subscription, "metadata", {}),
+            "items": getattr(subscription, "items", {}),
+        }
+
+    metadata = sub_data.get("metadata") or {}
+    user_id = user_id_override or metadata.get("user_id")
+    stripe_customer_id = _stripe_object_id(sub_data.get("customer"))
+    stripe_sub_id = sub_data.get("id")
+
+    # Resolve user_id if missing
     if not user_id:
-        customer_id = _stripe_object_id(subscription.get("customer"))
-        if customer_id:
-            existing_by_customer = _latest_subscription_for_customer(customer_id)
+        if stripe_sub_id:
+            existing_by_sub = _latest_subscription_for_stripe_id(stripe_sub_id)
+            if existing_by_sub:
+                user_id = existing_by_sub.get("user_id")
+        
+        if not user_id and stripe_customer_id:
+            existing_by_customer = _latest_subscription_for_customer(stripe_customer_id)
             if existing_by_customer:
                 user_id = existing_by_customer.get("user_id")
 
@@ -567,30 +558,39 @@ def _upsert_subscription_row(subscription: dict[str, Any]) -> dict[str, Any]:
             detail="Stripe subscription is missing the user_id metadata.",
         )
 
-    price_id = _subscription_price_id(subscription)
-    if not price_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Stripe subscription is missing a price reference.",
-        )
+    # Prepare payload with available fields
+    payload: dict[str, Any] = {"user_id": user_id}
+    
+    price_id = _subscription_price_id(sub_data)
+    if price_id:
+        plan = _find_plan_by_price_id(price_id)
+        payload["plan_id"] = plan["id"]
+        
+        billing_interval = _subscription_billing_interval(sub_data)
+        if billing_interval:
+            payload["billing_interval"] = billing_interval
 
-    plan = _find_plan_by_price_id(price_id)
-    billing_interval = _subscription_billing_interval(subscription)
-    mapped_status = _map_subscription_status(subscription.get("status", "active"))
-    current_period_end = subscription.get("current_period_end")
-    stripe_customer_id = _stripe_object_id(subscription.get("customer"))
+    if sub_data.get("status"):
+        payload["status"] = _map_subscription_status(sub_data["status"])
+    
+    if stripe_customer_id:
+        payload["stripe_customer_id"] = stripe_customer_id
+    
+    if stripe_sub_id:
+        payload["stripe_sub_id"] = stripe_sub_id
 
-    payload = {
-        "user_id": user_id,
-        "plan_id": plan["id"],
-        "billing_interval": billing_interval,
-        "stripe_customer_id": stripe_customer_id,
-        "stripe_sub_id": subscription.get("id"),
-        "status": mapped_status,
-        "current_period_end": _timestamp_to_iso(current_period_end),
-    }
+    current_period_end = sub_data.get("current_period_end")
+    current_period_end_iso = _timestamp_to_iso(current_period_end)
+    if current_period_end_iso:
+        payload["current_period_end"] = current_period_end_iso
 
-    existing = _latest_subscription_for_user(user_id)
+    # Find existing record to update
+    existing = None
+    if stripe_sub_id:
+        existing = _latest_subscription_for_stripe_id(stripe_sub_id)
+    if not existing:
+        existing = _latest_subscription_for_user(user_id)
+
     if existing:
         result = (
             supabase_admin.table("subscriptions")
@@ -598,26 +598,31 @@ def _upsert_subscription_row(subscription: dict[str, Any]) -> dict[str, Any]:
             .eq("id", existing["id"])
             .execute()
         )
-    else:
+    elif "plan_id" in payload:
+        # Only create a new record if we have enough info (plan_id)
         result = supabase_admin.table("subscriptions").insert(payload).execute()
+    else:
+        # Cannot update (no existing record) and cannot create (no plan_id)
+        return payload
 
     return result.data[0] if result.data else payload
 
 
-def _cancel_subscription_row(subscription: dict[str, Any]) -> dict[str, Any] | None:
-    metadata = subscription.get("metadata") or {}
+def _cancel_subscription_row(subscription: Any) -> dict[str, Any] | None:
+    sub_data = subscription if isinstance(subscription, dict) else getattr(subscription, "to_dict", lambda: {})()
+    metadata = sub_data.get("metadata") or {}
     user_id = metadata.get("user_id")
-    stripe_customer_id = _stripe_object_id(subscription.get("customer"))
-    stripe_sub_id = _stripe_object_id(subscription.get("id"))
-    price_id = _subscription_price_id(subscription)
+    stripe_customer_id = _stripe_object_id(sub_data.get("customer"))
+    stripe_sub_id = _stripe_object_id(sub_data.get("id"))
+    price_id = _subscription_price_id(sub_data)
 
     existing = None
-    if user_id:
+    if stripe_sub_id:
+        existing = _latest_subscription_for_stripe_id(stripe_sub_id)
+    if not existing and user_id:
         existing = _latest_subscription_for_user(user_id)
     if not existing and stripe_customer_id:
         existing = _latest_subscription_for_customer(stripe_customer_id)
-    if not existing and stripe_sub_id:
-        existing = _latest_subscription_for_stripe_id(stripe_sub_id)
 
     if not existing and user_id and price_id:
         return _upsert_subscription_row(subscription)
@@ -626,7 +631,7 @@ def _cancel_subscription_row(subscription: dict[str, Any]) -> dict[str, Any] | N
         return None
 
     payload: dict[str, Any] = {"status": "cancelled"}
-    current_period_end = subscription.get("current_period_end")
+    current_period_end = sub_data.get("current_period_end")
     if current_period_end:
         payload["current_period_end"] = _timestamp_to_iso(current_period_end)
     if stripe_customer_id:
@@ -636,7 +641,7 @@ def _cancel_subscription_row(subscription: dict[str, Any]) -> dict[str, Any] | N
     if price_id:
         plan = _find_plan_by_price_id(price_id)
         payload["plan_id"] = plan["id"]
-        payload["billing_interval"] = _subscription_billing_interval(subscription)
+        payload["billing_interval"] = _subscription_billing_interval(sub_data)
 
     result = (
         supabase_admin.table("subscriptions")
@@ -716,7 +721,9 @@ def _upsert_payment_from_invoice(
 
     subscription = stripe.Subscription.retrieve(subscription_id)
     user_id = _resolve_user_id_for_invoice(resolved_invoice, subscription)
-    if not user_id:
+    if user_id:
+        _upsert_subscription_row(subscription, user_id_override=user_id)
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unable to resolve user_id for the invoice payment.",

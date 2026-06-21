@@ -5,6 +5,12 @@ from datetime import datetime
 class ChatRenameRequest(BaseModel):
     title: str
 
+class MessageEditRequest(BaseModel):
+    content: str
+
+class ResponseRefineRequest(BaseModel):
+    instructions: str
+
 class ChatMessageSnapshot(BaseModel):
     role: str
     content: str
