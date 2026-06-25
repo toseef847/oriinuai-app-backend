@@ -21,7 +21,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - **Advanced Interaction**: Utilize the `_stream_chat_response` helper for all LLM interactions, including message edits and response refinements.
 - Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS.md`
 - **Admin API Pattern**: All admin endpoints under `app/api/v1/endpoints/admin/` use `require_admin` or `get_admin_profile` from `app/core/security.py` for authentication.
-- **Admin Auth Service**: Admin-specific auth lives in `app/services/auth/admin_auth_service.py` with email/password login, OTP-based password reset, and profile management.
+- **Admin Auth Service**: Admin-specific auth lives in `app/services/auth/admin_auth_service.py` with email/password login, token refresh, OTP-based password reset, and profile management.
 - **User Blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403.
 - **Admin Auth Header Reset**: After any `verify_otp` or `sign_in_with_password` call, call `_reset_admin_auth_header()` to restore service role key on `supabase_admin` client.
 
@@ -112,7 +112,7 @@ pytest --cov=app --cov-report=html
 - Virtual environment with `venv`
 - Install from `requirements.txt` (exact versions)
 - Environment variables from `.env` file
-- Redis for rate limiting (optional for dev)
+- Redis remains optional for caching or other future uses; no custom in-app general admin throttling is required.
 - Supabase for database and storage
 - **Vercel deployment**: Entry point is `api/index.py` which re-exports `app.main.app`; configured via `vercel.json` with `@vercel/python` builder
 
@@ -150,7 +150,7 @@ uvicorn app.main:app --reload --port 8000
 - **Standardized Response Pattern**: All endpoints must return the `ApiResponse` envelope: `{ "status": int, "message": str, "data": Any | null }` using helpers from `app/utils/response.py`.
 - **Validation Errors**: Standardized 422 errors return a simplified message string instead of nested arrays.
 - Authentication via JWT tokens
-- Rate limiting and usage tracking
+- Edge/cloud rate limiting may be applied externally; keep usage tracking in the app layer.
 
 ### Database Standards
 - Use Supabase RPC functions for complex queries
@@ -189,7 +189,7 @@ Required for development:
 - `OPENAI_API_KEY` (fallback)
 - `FRONTEND_URL` (for Stripe checkout and billing portal redirects)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments; price IDs should live in `public.plans` first)
-- `REDIS_URL` (for rate limiting, optional)
+- `REDIS_URL` (optional; only needed for Redis-backed features)
 - `ADMIN_IMAGE_BUCKET` (optional, defaults to `PROFILE_IMAGE_BUCKET`)
 
 ## Key Files & Directories
@@ -221,13 +221,13 @@ app/
         └── admin/
             ├── __init__.py
             ├── router.py     # Admin router aggregator
-            ├── auth.py       # Admin auth endpoints (login, forgot-password, reset, /me)
+            ├── auth.py       # Admin auth endpoints (login, refresh, forgot-password, reset, /me)
             ├── profile.py    # Admin profile management (unified PUT endpoint)
             ├── books.py      # Books dashboard, listing, upload, ingest, publish, delete
-            ├── users.py      # User list (rich fields), block/unblock, bulk operations
-            ├── insights.py   # Dashboard analytics (totals, earnings, plan distribution)
+            ├── users.py      # User list (rich fields, search), block/unblock, bulk operations
+            ├── insights.py   # Dashboard analytics (totals, earnings, de-duplicated plan distribution)
             ├── plans.py      # Admin plan listing
-            └── transactions.py  # Payment/subscription transaction listing
+            └── transactions.py  # Payment/subscription transaction listing with search
 
 api/
 ├── index.py             # Vercel entry point (re-exports app.main.app)
@@ -258,10 +258,12 @@ scripts/                 # Utility scripts
 - **Separate `admins` table**: Dedicated table (not `profiles`) with `is_blocked` support
 - **Email/password login**: Admin login uses `sign_in_with_password()` (no OTP for login)
 - **Password reset**: OTP-based via `reset_password_for_email()` + `verify_otp(type: "recovery")`; same token store pattern as user flow
+- **Token refresh**: Admin auth now exposes `POST /admin/auth/refresh` using the same Supabase session refresh flow as user auth.
 - **No email enumeration**: Login always returns "Invalid email or password" regardless of whether email exists; forgot-password always returns success even for non-existent admins
 - **Admin profile management**: Unified `PUT /admin/profile` endpoint (multipart/form-data) handles name, bio, image upload, and password change in one request; returns `updates_applied` list
 - **User blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403; admin blocking endpoints at `/admin/users/{id}/block` and `/admin/users/{id}/unblock`
-- **Admin and user images**: Admin images stored at `/admins/{admin_id}/` in storage bucket (separate from user profile images at `/profile-images/`)
+- **Admin and user images**: Public URLs are generated for profile payloads when buckets are public; signed URL helpers remain available for private-bucket use.
+- **Admin search**: Admin user and transaction list endpoints support keyword search.
 
 ## Communication Guidelines
 
@@ -276,5 +278,5 @@ For production issues:
 - Check Supabase dashboard for database status
 - Monitor Google AI Studio API usage
 - Review Stripe webhook logs
-- Check Redis connection if rate limiting fails</content>
+- Check Redis connection if any Redis-backed feature fails</content>
 <parameter name="filePath">agents.md
