@@ -5,11 +5,12 @@ from pydantic import BaseModel, EmailStr
 from app.core.security import get_admin_profile
 from app.services.auth.admin_auth_service import (
     login_admin,
+    refresh_admin_token,
     send_admin_password_reset_otp,
     verify_admin_password_reset_otp,
     reset_admin_password,
 )
-from app.schemas.auth import LoginRequest, EmailRequest
+from app.schemas.auth import LoginRequest, EmailRequest, RefreshTokenRequest
 from app.utils.response import api_success
 
 router = APIRouter()
@@ -27,15 +28,24 @@ async def admin_login(payload: LoginRequest):
     data = login_admin(payload.email, payload.password)
     return api_success(data=data, message="Login successful")
 
+
+@router.post("/refresh")
+async def admin_refresh(payload: RefreshTokenRequest):
+    data = refresh_admin_token(payload.refresh_token)
+    return api_success(data=data, message="Token refreshed")
+
+
 @router.post("/forgot-password/send-otp")
 async def send_password_reset_otp(payload: EmailRequest):
     data = send_admin_password_reset_otp(payload.email)
     return api_success(data=None, message=data["message"])
 
+
 @router.post("/forgot-password/verify-otp")
 async def verify_password_reset_otp(payload: AdminVerifyOTPRequest):
     data = verify_admin_password_reset_otp(payload.email, payload.otp)
     return api_success(data=data, message="OTP verified")
+
 
 @router.post("/reset-password")
 async def reset_password(

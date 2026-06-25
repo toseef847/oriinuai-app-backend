@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.db.supabase import supabase, supabase_admin, get_public_url, get_signed_url
+from app.db.supabase import supabase, supabase_admin, get_public_url
 from app.core.config import settings
 
 bearer_scheme = HTTPBearer()
@@ -61,10 +61,9 @@ async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> di
             detail="Your account has been blocked. Contact support for assistance."
         )
     
-    profile["profile_image_url"] = get_signed_url(
-        settings.PROFILE_IMAGE_BUCKET, 
+    profile["profile_image_url"] = get_public_url(
+        settings.PROFILE_IMAGE_BUCKET,
         profile.get("profile_image_path"),
-        3600 * 24
     )
     return profile
 
@@ -120,10 +119,9 @@ async def get_admin_profile(admin_id: str = Depends(get_admin_user_id)) -> dict:
         )
     
     # Add signed URL for profile image
-    profile["profile_image_url"] = get_signed_url(
+    profile["profile_image_url"] = get_public_url(
         ADMIN_IMAGE_BUCKET,
         profile.get("profile_image_path"),
-        3600 * 24
     )
     
     return profile

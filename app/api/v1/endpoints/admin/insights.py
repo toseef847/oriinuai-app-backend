@@ -8,27 +8,51 @@ router = APIRouter()
 
 @router.get("/insights/dashboard")
 async def admin_dashboard_insights(_: dict = Depends(require_admin)):
-    # 1. Total users
     profiles_res = supabase_admin.table("profiles").select("id").eq("role", "user").execute()
-    total_users = len(profiles_res.data) if profiles_res.data else 0
+    user_ids = [profile["id"] for profile in (profiles_res.data or []) if profile.get("id")]
+    total_users = len(user_ids)
 
-    # 2. Plan mapping & distribution
-    plans_res = supabase_admin.table("plans").select("id, name").execute()
-    plan_map = {p["id"]: p["name"] for p in plans_res.data} if plans_res.data else {}
-
-    subs_res = supabase_admin.table("subscriptions").select("plan_id").execute()
     plan_distribution = {
         "foundation": 0,
         "core": 0,
-        "inner_circle": 0
+        "inner_circle": 0,
     }
-    for sub in (subs_res.data or []):
-        plan_name = plan_map.get(sub["plan_id"])
-        if plan_name:
-            plan_distribution[plan_name] = plan_distribution.get(plan_name, 0) + 1
 
-    free_users = plan_distribution.get("foundation", 0)
-    premium_users = plan_distribution.get("core", 0) + plan_distribution.get("inner_circle", 0)
+    free_users = 0
+    premium_users = 0
+    if user_ids:
+        plans_res = supabase_admin.table("plans").select("id, name").execute()
+        plan_map = {
+            plan["id"]: plan["name"]
+            for plan in (plans_res.data or [])
+            if plan.get("id") and plan.get("name")
+        }
+
+        subs_res = (
+            supabase_admin.table("subscriptions")
+            .select("user_id, plan_id, updated_at, created_at")
+            .in_("user_id", user_ids)
+            .order("updated_at", desc=True)
+            .order("created_at", desc=True)
+            .execute()
+        )
+
+        latest_plan_by_user: dict[str, str] = {}
+        for subscription in (subs_res.data or []):
+            user_id = subscription.get("user_id")
+            if not user_id or user_id in latest_plan_by_user:
+                continue
+
+            plan_name = plan_map.get(subscription.get("plan_id"), "foundation")
+            latest_plan_by_user[user_id] = plan_name if plan_name in plan_distribution else "foundation"
+
+        for plan_name in latest_plan_by_user.values():
+            if plan_name in ("core", "inner_circle"):
+                premium_users += 1
+                plan_distribution[plan_name] += 1
+
+        free_users = total_users - premium_users
+        plan_distribution["foundation"] = free_users
 
     # 3. Earnings & Earnings over time
     payments_res = supabase_admin.table("payments").select("amount_cents, created_at").eq("status", "paid").execute()

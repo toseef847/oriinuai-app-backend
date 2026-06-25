@@ -82,6 +82,28 @@ def test_list_users_include_blocked_when_requested(admin_token):
     assert "users" in resp.json()["data"]
 
 
+def test_list_users_search_by_email_or_name(admin_token):
+    initial = client.get(
+        "/api/v1/admin/users?limit=5&include_blocked=true",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert initial.status_code == 200
+    users = initial.json()["data"]["users"]
+    if not users:
+        pytest.skip("No users in database")
+
+    target = users[0]
+    search_term = (target.get("email") or target.get("full_name") or target["id"])
+    resp = client.get(
+        f"/api/v1/admin/users?search={search_term}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    results = resp.json()["data"]["users"]
+    assert results
+    assert any(search_term.lower() in (u.get("email", "") + u.get("full_name", "") + u.get("id", "")).lower() for u in results)
+
+
 def test_list_users_ordered_by_joined_date(admin_token):
     resp = client.get(
         "/api/v1/admin/users?limit=50",
@@ -227,6 +249,18 @@ def test_list_blocked_users(admin_token):
     for user in resp.json()["data"]["users"]:
         assert user["status"] == "blocked"
         assert user["is_blocked"] is True
+
+
+def test_profile_image_urls_are_public(admin_token):
+    resp = client.get(
+        "/api/v1/admin/users?limit=10",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    for user in resp.json()["data"]["users"]:
+        url = user.get("profile_image_url")
+        if url:
+            assert "/storage/v1/object/public/" in url
 
 
 def test_block_nonexistent_user(admin_token):

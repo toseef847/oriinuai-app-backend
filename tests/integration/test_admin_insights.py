@@ -48,6 +48,7 @@ def test_total_users_count(admin_token):
     data = response.json()["data"]
     assert isinstance(data["total_users"], int)
     assert data["total_users"] >= 0
+    assert data["free_users"] + data["premium_users"] == data["total_users"]
 
 
 def test_plan_distribution_structure(admin_token):

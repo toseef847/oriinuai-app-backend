@@ -1,10 +1,29 @@
 from fastapi import APIRouter, Depends, Query
 from app.core.security import require_admin
-from app.db.supabase import supabase_admin, get_signed_url
+from app.db.supabase import supabase_admin, get_public_url
 from app.core.config import settings
 from app.utils.response import api_success
 
 router = APIRouter()
+
+
+def _matches_transaction_search(payment: dict, profile: dict, subscription: dict | None, search: str | None) -> bool:
+    if not search:
+        return True
+
+    normalized = search.strip().lower()
+    package_name = subscription.get("plans", {}).get("display_name", "Foundation") if subscription else "Foundation"
+    return any(
+        normalized in field
+        for field in (
+            str(payment.get("id", "")).lower(),
+            str(payment.get("user_id", "")).lower(),
+            str(profile.get("id", "")).lower(),
+            str(profile.get("full_name", "")).lower(),
+            str(profile.get("email", "")).lower(),
+            package_name.lower(),
+        )
+    )
 
 
 @router.get("/transactions")
@@ -16,6 +35,7 @@ async def list_transactions(
     user_id: str | None = None,
     plan: str | None = None,
     status: str | None = None,
+    search: str | None = Query(None, min_length=1),
     admin: dict = Depends(require_admin)
 ):
     # Build base query
@@ -54,6 +74,9 @@ async def list_transactions(
         # Apply plan filter if provided
         if plan and package_name.lower() != plan.lower():
             continue
+
+        if not _matches_transaction_search(payment, profile, subscription, search):
+            continue
             
         transaction_data = {
             "id": payment["id"],
@@ -62,10 +85,9 @@ async def list_transactions(
             "username": profile.get("full_name") or (profile.get("email").split("@")[0] if profile.get("email") else "user"),
             "full_name": profile.get("full_name"),
             "email": profile.get("email"),
-            "profile_image_url": get_signed_url(
+            "profile_image_url": get_public_url(
                 settings.PROFILE_IMAGE_BUCKET,
                 profile.get("profile_image_path"),
-                expires_in=3600 * 24
             ),
             "package_name": package_name,
             "started_on": subscription.get("created_at") if subscription else None,
