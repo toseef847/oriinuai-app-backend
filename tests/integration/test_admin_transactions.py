@@ -138,6 +138,35 @@ def test_list_transactions_filter_by_plan(admin_token):
         assert txn["package_name"].lower() == plan_name.lower()
 
 
+def test_list_transactions_search(admin_token):
+    list_resp = client.get(
+        "/api/v1/admin/transactions?limit=1",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert list_resp.status_code == 200
+    existing = list_resp.json()["data"]["transactions"]
+    if not existing:
+        pytest.skip("No transactions to search")
+
+    target = existing[0]
+    search_term = target.get("payment_id") or target.get("user_id") or target.get("package_name")
+    response = client.get(
+        f"/api/v1/admin/transactions?search={search_term}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    for txn in response.json()["data"]["transactions"]:
+        haystack = " ".join([
+            txn.get("payment_id", ""),
+            txn.get("user_id", ""),
+            txn.get("username", ""),
+            txn.get("full_name", ""),
+            txn.get("email", ""),
+            txn.get("package_name", ""),
+        ]).lower()
+        assert search_term.lower() in haystack
+
+
 # ── Field validations ──────────────────────────────────────────────────────
 
 def test_transaction_subscription_type_values(admin_token):
@@ -198,3 +227,15 @@ def test_list_transactions_with_no_results(admin_token):
     assert response.status_code == 200
     transactions = response.json()["data"]["transactions"]
     assert transactions == []
+
+
+def test_transaction_profile_images_are_public(admin_token):
+    response = client.get(
+        "/api/v1/admin/transactions?limit=10",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+    for txn in response.json()["data"]["transactions"]:
+        url = txn.get("profile_image_url")
+        if url:
+            assert "/storage/v1/object/public/" in url

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from app.core.config import settings
-from app.db.supabase import create_auth_supabase_client, get_signed_url, supabase_admin
+from app.db.supabase import create_auth_supabase_client, get_public_url, supabase_admin
 from app.services.auth.reset_store import create_reset_token, consume_reset_token
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -75,6 +75,47 @@ def login_admin(email: str, password: str) -> dict:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password."
+        )
+
+
+def refresh_admin_token(refresh_token: str) -> dict:
+    """
+    Refresh admin auth session and verify the refreshed user is still a valid admin.
+    """
+    try:
+        result = _auth_client().auth.refresh_session(refresh_token)
+        _reset_admin_auth_header()
+
+        if not result.user or not result.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired authentication token."
+            )
+
+        admin_profile = supabase_admin.table("admins").select("*").eq("id", result.user.id).limit(1).execute()
+        if not admin_profile or not admin_profile.data or len(admin_profile.data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired authentication token."
+            )
+
+        admin_data = admin_profile.data[0]
+        if admin_data.get("is_blocked"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin account has been blocked."
+            )
+
+        return {
+            "user": result.user.dict(exclude_none=True) if result.user else None,
+            "session": result.session.dict(exclude_none=True) if result.session else None,
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired authentication token."
         )
 
 
@@ -187,10 +228,9 @@ def get_admin_profile(admin_id: str) -> dict:
         )
     
     # Add signed URL for profile image
-    profile["profile_image_url"] = get_signed_url(
+    profile["profile_image_url"] = get_public_url(
         ADMIN_IMAGE_BUCKET,
         profile.get("profile_image_path"),
-        3600 * 24
     )
     
     return profile
@@ -250,10 +290,9 @@ def update_admin_profile(
             supabase_admin.table("admins").update(updates).eq("id", admin_id).execute()
             
             if "profile_image_path" in updates:
-                updates["profile_image_url"] = get_signed_url(
+                updates["profile_image_url"] = get_public_url(
                     ADMIN_IMAGE_BUCKET,
                     updates["profile_image_path"],
-                    3600 * 24
                 )
                 
             return {"message": "Profile updated successfully.", "profile": updates}

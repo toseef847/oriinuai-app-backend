@@ -24,6 +24,27 @@ def test_admin_login_success():
     assert "access_token" in data["session"]
 
 
+def test_admin_refresh_token():
+    login_response = client.post(
+        "/api/v1/admin/auth/login",
+        json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+    )
+    assert login_response.status_code == 200
+    login_data = login_response.json()["data"]
+    session = login_data.get("session", {})
+    refresh_token = session.get("refresh_token")
+    assert refresh_token, "refresh_token not found in login response"
+
+    refresh_response = client.post(
+        "/api/v1/admin/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    assert refresh_response.status_code == 200
+    refreshed = refresh_response.json()["data"]
+    assert "session" in refreshed
+    assert "access_token" in refreshed["session"]
+
+
 def test_admin_login_invalid_email():
     response = client.post(
         "/api/v1/admin/auth/login",

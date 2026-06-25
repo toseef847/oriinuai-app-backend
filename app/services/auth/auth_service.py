@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from app.core.config import settings
-from app.db.supabase import create_auth_supabase_client, get_public_url, get_signed_url, supabase_admin
+from app.db.supabase import create_auth_supabase_client, get_public_url, supabase_admin
 from app.services.auth.reset_store import create_reset_token, consume_reset_token
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
@@ -233,10 +233,9 @@ def update_user_profile(
             supabase_admin.table("profiles").update(updates).eq("id", user_id).execute()
             
             if "profile_image_path" in updates:
-                updates["profile_image_url"] = get_signed_url(
-                    settings.PROFILE_IMAGE_BUCKET, 
+                updates["profile_image_url"] = get_public_url(
+                    settings.PROFILE_IMAGE_BUCKET,
                     updates["profile_image_path"],
-                    3600 * 24
                 )
                 
             return {"message": "Profile updated successfully.", "profile": updates}

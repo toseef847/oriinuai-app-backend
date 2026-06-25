@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException
 from pydantic import BaseModel
 from app.core.security import require_admin
-from app.db.supabase import supabase_admin, get_signed_url
+from app.db.supabase import supabase_admin, get_public_url
 from app.core.config import settings
 from app.utils.response import api_success
 
@@ -26,54 +26,63 @@ def _log_admin_action(admin_id: UUID, action: str, target_type: str, target_id: 
     except Exception as e:
         print(f"Failed to log admin action: {e}")
 
+
+def _format_profile(profile: dict) -> dict:
+    subscription = None
+    if profile.get("subscriptions") and len(profile["subscriptions"]) > 0:
+        subscription = profile["subscriptions"][0]
+
+    return {
+        "id": profile["id"],
+        "username": profile.get("full_name") or (profile.get("email").split("@")[0] if profile.get("email") else "user"),
+        "full_name": profile.get("full_name"),
+        "email": profile.get("email"),
+        "profile_image_url": get_public_url(
+            settings.PROFILE_IMAGE_BUCKET,
+            profile.get("profile_image_path"),
+        ),
+        "joined_date": profile.get("created_at"),
+        "plan_name": subscription.get("plans", {}).get("display_name") if subscription else "Foundation",
+        "subscription_type": subscription.get("billing_interval", "free") if subscription else "free",
+        "status": "blocked" if profile.get("is_blocked") else "active",
+        "is_blocked": profile.get("is_blocked", False),
+    }
+
+
+def _matches_user_search(profile: dict, search: str | None) -> bool:
+    if not search:
+        return True
+
+    normalized = search.strip().lower()
+    return any(
+        normalized in field
+        for field in (
+            str(profile.get("id", "")).lower(),
+            str(profile.get("email", "")).lower(),
+            str(profile.get("full_name", "")).lower(),
+        )
+    )
+
 @router.get("/users")
 async def list_users(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     include_blocked: bool = Query(True),
+    search: str | None = Query(None, min_length=1),
     _: dict = Depends(require_admin)
 ):
-    # Base query for count
-    count_query = supabase_admin.table("profiles").select("id").eq("role", "user")
-    if not include_blocked:
-        count_query = count_query.eq("is_blocked", False)
-        
-    count_res = count_query.execute()
-    total = len(count_res.data) if count_res.data else 0
-
-    # Paginated query with joins
     query = supabase_admin.table("profiles").select(
-        "id, email, full_name, created_at, is_blocked, subscriptions(billing_interval, plans(display_name))"
+        "id, email, full_name, profile_image_path, created_at, is_blocked, subscriptions(billing_interval, plans(display_name))"
     ).eq("role", "user")
     
     if not include_blocked:
         query = query.eq("is_blocked", False)
 
+    result = query.order("created_at", desc=True).execute()
+    filtered_profiles = [profile for profile in (result.data or []) if _matches_user_search(profile, search)]
+    total = len(filtered_profiles)
     offset = (page - 1) * limit
-    result = query.order("created_at", desc=True).offset(offset).limit(limit).execute()
-
-    users_data = []
-    for profile in (result.data or []):
-        subscription = None
-        if profile.get("subscriptions") and len(profile["subscriptions"]) > 0:
-            subscription = profile["subscriptions"][0]
-
-        users_data.append({
-            "id": profile["id"],
-            "username": profile.get("full_name") or (profile.get("email").split("@")[0] if profile.get("email") else "user"),
-            "full_name": profile.get("full_name"),
-            "email": profile.get("email"),
-            "profile_image_url": get_signed_url(
-                settings.PROFILE_IMAGE_BUCKET,
-                profile.get("profile_image_path"),
-                expires_in=3600 * 24
-            ),
-            "joined_date": profile.get("created_at"),
-            "plan_name": subscription.get("plans", {}).get("display_name") if subscription else "Foundation",
-            "subscription_type": subscription.get("billing_interval", "free") if subscription else "free",
-            "status": "blocked" if profile.get("is_blocked") else "active",
-            "is_blocked": profile.get("is_blocked", False)
-        })
+    users_data = [_format_profile(profile) for profile in filtered_profiles[offset:offset + limit]]
 
     return api_success(data={
         "users": users_data,
@@ -87,40 +96,17 @@ async def list_users(
 async def list_blocked_users(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None, min_length=1),
     _: dict = Depends(require_admin)
 ):
-    # Base query for count of blocked users
-    count_res = supabase_admin.table("profiles").select("id").eq("role", "user").eq("is_blocked", True).execute()
-    total = len(count_res.data) if count_res.data else 0
-
-    # Paginated query with joins
-    offset = (page - 1) * limit
     result = supabase_admin.table("profiles").select(
         "id, email, full_name, created_at, is_blocked, subscriptions(billing_interval, plans(display_name))"
-    ).eq("role", "user").eq("is_blocked", True).order("created_at", desc=True).offset(offset).limit(limit).execute()
+    ).eq("role", "user").eq("is_blocked", True).order("created_at", desc=True).execute()
 
-    users_data = []
-    for profile in (result.data or []):
-        subscription = None
-        if profile.get("subscriptions") and len(profile["subscriptions"]) > 0:
-            subscription = profile["subscriptions"][0]
-
-        users_data.append({
-            "id": profile["id"],
-            "username": profile.get("full_name") or (profile.get("email").split("@")[0] if profile.get("email") else "user"),
-            "full_name": profile.get("full_name"),
-            "email": profile.get("email"),
-            "profile_image_url": get_signed_url(
-                settings.PROFILE_IMAGE_BUCKET,
-                profile.get("profile_image_path"),
-                expires_in=3600 * 24
-            ),
-            "joined_date": profile.get("created_at"),
-            "plan_name": subscription.get("plans", {}).get("display_name") if subscription else "Foundation",
-            "subscription_type": subscription.get("billing_interval", "free") if subscription else "free",
-            "status": "blocked" if profile.get("is_blocked") else "active",
-            "is_blocked": profile.get("is_blocked", False)
-        })
+    filtered_profiles = [profile for profile in (result.data or []) if _matches_user_search(profile, search)]
+    total = len(filtered_profiles)
+    offset = (page - 1) * limit
+    users_data = [_format_profile(profile) for profile in filtered_profiles[offset:offset + limit]]
 
     return api_success(data={
         "users": users_data,
