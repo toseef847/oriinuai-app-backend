@@ -128,7 +128,7 @@ def test_upload_invalid_image_type(admin_token, tmp_path):
 
 
 def test_upload_image_too_large(admin_token, tmp_path):
-    """Service does not currently enforce a size limit; mark xfail if still true."""
+    """Profile images larger than 5 MiB are rejected."""
     img_path = tmp_path / "large.jpg"
     # ~6 MB file
     img_path.write_bytes(b"\xff\xd8\xff\xd9" * (6 * 1024 * 1024 // 3 + 1))
@@ -138,9 +138,8 @@ def test_upload_image_too_large(admin_token, tmp_path):
             files={"profile_image": ("large.jpg", f, "image/jpeg")},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-    # If the service has no size enforcement this will succeed (200).
-    # If a size check is added later, expect 400.
-    assert response.status_code in (200, 400)
+    assert response.status_code == 413
+    assert "must not exceed 5 MiB" in response.json()["message"]
 
 
 # ── Password change ────────────────────────────────────────────────────────

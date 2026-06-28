@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+
 import app.db.supabase as supabase_module
 import app.services.auth.auth_service as auth_service
 
@@ -33,7 +36,9 @@ def test_create_auth_supabase_client_disables_session_persistence(monkeypatch):
         return _FakeClient()
 
     monkeypatch.setattr(supabase_module, "create_client", fake_create_client)
-    monkeypatch.setattr(supabase_module.settings, "SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setattr(
+        supabase_module.settings, "SUPABASE_URL", "https://example.supabase.co"
+    )
     monkeypatch.setattr(supabase_module.settings, "SUPABASE_ANON_KEY", "anon-key")
 
     client = supabase_module.create_auth_supabase_client()
@@ -49,11 +54,16 @@ def test_login_user_uses_auth_client_not_admin_client(monkeypatch):
     auth_client = _FakeClient()
     admin_client = _FakeClient()
 
-    monkeypatch.setattr(auth_service, "create_auth_supabase_client", lambda: auth_client)
+    monkeypatch.setattr(
+        auth_service, "create_auth_supabase_client", lambda: auth_client
+    )
     monkeypatch.setattr(auth_service, "supabase_admin", admin_client)
+    monkeypatch.setattr(auth_service, "reset_admin_auth_header", lambda: None)
 
-    auth_service.login_user("user@example.com", "secret")
+    with pytest.raises(HTTPException) as exc_info:
+        auth_service.login_user("user@example.com", "secret")
 
+    assert exc_info.value.status_code == 401
     assert auth_client.auth.calls == [
         ("sign_in_with_password", {"email": "user@example.com", "password": "secret"})
     ]

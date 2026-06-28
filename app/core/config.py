@@ -23,7 +23,11 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> List[str]:
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+        return [
+            origin.strip()
+            for origin in self.ALLOWED_ORIGINS.split(",")
+            if origin.strip()
+        ]
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -34,7 +38,15 @@ class Settings(BaseSettings):
             normalized = value.strip().lower()
             if normalized in {"1", "true", "yes", "on", "debug"}:
                 return True
-            if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+            if normalized in {
+                "0",
+                "false",
+                "no",
+                "off",
+                "release",
+                "prod",
+                "production",
+            }:
                 return False
         return bool(value)
 
@@ -48,16 +60,16 @@ class Settings(BaseSettings):
     # LLM — google_ai_studio | openai (no ollama)
     LLM_PROVIDER: str = "google_ai_studio"
     GOOGLE_AI_STUDIO_KEY: str = ""
-    GEMMA_FREE_MODEL: str = "models/gemini-2.5-flash"
-    GEMMA_PRO_MODEL: str = "models/gemini-3-flash-preview"
-    GEMMA_ELITE_MODEL: str = "models/gemini-2.5-pro"
+    GEMMA_FREE_MODEL: str = "models/gemini-2.5-flash-lite"
+    GEMMA_PRO_MODEL: str = "models/gemini-3.1-flash-lite"
+    GEMMA_ELITE_MODEL: str = "models/gemini-3.5-flash"
     OPENAI_API_KEY: str = ""
     OPENAI_MINI_MODEL: str = "gpt-4o-mini"
     OPENAI_FULL_MODEL: str = "gpt-4o"
 
     # Embeddings — google | openai (no local/sentence-transformers)
     EMBEDDING_PROVIDER: str = "google"
-    EMBEDDING_DIMENSIONS: int = 768   # 768=google | 1536=openai
+    EMBEDDING_DIMENSIONS: int = 768  # 768=google | 1536=openai
 
     # Plan limits
     FOUNDATION_DAILY_MESSAGES: int = 5
@@ -77,6 +89,13 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
+    REDIS_TIMEOUT_SECONDS: float = 1.0
+    AUTH_RATE_LIMIT_ATTEMPTS: int = 5
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = 900
+
+    # Upload limits
+    MAX_BOOK_UPLOAD_BYTES: int = 50 * 1024 * 1024
+    MAX_PROFILE_IMAGE_UPLOAD_BYTES: int = 5 * 1024 * 1024
 
 
 settings = Settings()

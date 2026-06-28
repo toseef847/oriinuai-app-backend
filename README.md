@@ -14,6 +14,12 @@ pip install -r requirements.txt
 
 2. Copy `.env.example` to `.env` and fill in your Supabase, AI, Stripe, and Redis values.
 
+Auth endpoints use Redis-backed rate limiting. If Redis is temporarily unavailable,
+authentication remains available and the outage is logged.
+
+Apply the numbered SQL files in order through the Supabase SQL Editor, including
+`sql/12_security_hardening.sql` for hashed reset tokens and retained payment history.
+
 3. Run the app locally:
 
 ```bash

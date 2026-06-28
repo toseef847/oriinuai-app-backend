@@ -1,12 +1,23 @@
+from typing import AsyncIterator
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from app.db.supabase import supabase, supabase_admin, get_public_url
+from postgrest import AsyncPostgrestClient
+
+from app.db.supabase import (
+    get_public_url,
+    supabase,
+    supabase_admin,
+    user_postgrest_client,
+)
 from app.core.config import settings
 
 bearer_scheme = HTTPBearer()
 
 # Use admin image bucket or fallback to profile images
-ADMIN_IMAGE_BUCKET = getattr(settings, "ADMIN_IMAGE_BUCKET", settings.PROFILE_IMAGE_BUCKET)
+ADMIN_IMAGE_BUCKET = getattr(
+    settings, "ADMIN_IMAGE_BUCKET", settings.PROFILE_IMAGE_BUCKET
+)
 
 
 def verify_token(
@@ -14,7 +25,11 @@ def verify_token(
 ) -> dict:
     try:
         user = supabase.auth.get_user(credentials.credentials)
-        return {"sub": user.user.id}
+        return {
+            "sub": user.user.id,
+            "access_token": credentials.credentials,
+            "user": user.user,
+        }
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -23,49 +38,61 @@ def verify_token(
         )
 
 
-def get_current_user_id(payload: dict = Depends(verify_token)) -> str:
-    return payload["sub"]
+def get_current_access_token(payload: dict = Depends(verify_token)) -> str:
+    return payload["access_token"]
 
 
-async def get_auth_user_status(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+async def get_user_db(
+    payload: dict = Depends(verify_token),
+) -> AsyncIterator[AsyncPostgrestClient]:
+    async with user_postgrest_client(payload["access_token"]) as client:
+        yield client
+
+
+async def get_auth_user_status(payload: dict = Depends(verify_token)) -> dict:
+    user = payload["user"]
+    return {
+        "email_verified": user.email_confirmed_at is not None,
+        "phone_verified": user.phone_confirmed_at is not None,
+    }
+
+
+async def get_current_profile(
+    payload: dict = Depends(verify_token),
+    client: AsyncPostgrestClient = Depends(get_user_db),
 ) -> dict:
-    try:
-        user = supabase.auth.get_user(credentials.credentials)
-        return {
-            "email_verified": user.user.email_confirmed_at is not None,
-            "phone_verified": user.user.phone_confirmed_at is not None,
-        }
-    except Exception:
-        return {"email_verified": False, "phone_verified": False}
-
-
-async def get_current_profile(user_id: str = Depends(get_current_user_id)) -> dict:
     """
     Fetches the user's profile from the database.
     This is more secure than trusting the JWT payload for sensitive fields like 'role'.
     """
-    res = supabase_admin.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+    user_id = payload["sub"]
+    res = (
+        await client.table("profiles").select("*").eq("id", user_id).limit(1).execute()
+    )
     if not res or not res.data or len(res.data) == 0:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="User profile not found."
         )
-    
+
     profile = res.data[0]
-    
+
     # Check if user is blocked
     if profile.get("is_blocked"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account has been blocked. Contact support for assistance."
+            detail="Your account has been blocked. Contact support for assistance.",
         )
-    
+
     profile["profile_image_url"] = get_public_url(
         settings.PROFILE_IMAGE_BUCKET,
         profile.get("profile_image_path"),
     )
     return profile
+
+
+def get_current_user_id(profile: dict = Depends(get_current_profile)) -> str:
+    """Return the authenticated user's ID only after block-status enforcement."""
+    return profile["id"]
 
 
 # ============================================================================
@@ -102,28 +129,29 @@ async def get_admin_profile(admin_id: str = Depends(get_admin_user_id)) -> dict:
     Fetches the admin's profile from admins table.
     Verifies admin is not blocked before returning profile.
     """
-    res = supabase_admin.table("admins").select("*").eq("id", admin_id).limit(1).execute()
+    res = (
+        supabase_admin.table("admins").select("*").eq("id", admin_id).limit(1).execute()
+    )
     if not res or not res.data or len(res.data) == 0:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Admin profile not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Admin profile not found."
         )
-    
+
     profile = res.data[0]
-    
+
     # Check if admin is blocked
     if profile.get("is_blocked"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin account has been blocked."
+            detail="Admin account has been blocked.",
         )
-    
+
     # Add signed URL for profile image
     profile["profile_image_url"] = get_public_url(
         ADMIN_IMAGE_BUCKET,
         profile.get("profile_image_path"),
     )
-    
+
     return profile
 
 

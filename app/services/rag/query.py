@@ -1,3 +1,5 @@
+from postgrest import AsyncPostgrestClient
+
 from app.services.rag.embedder import embedder
 from app.db.vector_store import vector_store
 
@@ -41,12 +43,14 @@ RESPONSE STYLE:
 
 async def build_rag_prompt(
     user_message: str,
+    client: AsyncPostgrestClient,
     top_k: int = 5,
     book_id: str = None,
 ) -> tuple[str, list[dict]]:
     query_embedding = embedder.embed_query(user_message)
 
     chunks = await vector_store.similarity_search(
+        client=client,
         query_embedding=query_embedding,
         top_k=top_k,
         book_id=book_id,
@@ -54,7 +58,9 @@ async def build_rag_prompt(
 
     context_parts = []
     for i, chunk in enumerate(chunks):
-        day_num = chunk.get("chunk_index") or chunk.get("metadata", {}).get("day_number", "")
+        day_num = chunk.get("chunk_index") or chunk.get("metadata", {}).get(
+            "day_number", ""
+        )
         law_name = chunk.get("metadata", {}).get("law_name", "")
         header = f"[Day {day_num} — {law_name}]" if day_num else f"[Excerpt {i+1}]"
         context_parts.append(f"{header}\n{chunk['content']}")

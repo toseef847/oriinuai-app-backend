@@ -1,4 +1,6 @@
 from typing import List
+from postgrest import AsyncPostgrestClient
+
 from app.db.supabase import get_async_admin_client
 
 
@@ -18,7 +20,7 @@ class VectorStore:
     ) -> None:
         metadata_list = metadata_list or [{} for _ in chunks]
         chunk_indices = chunk_indices or list(range(len(chunks)))
-        
+
         client = await get_async_admin_client()
 
         rows = [
@@ -29,18 +31,20 @@ class VectorStore:
                 "metadata": meta,
                 "chunk_index": idx,
             }
-            for chunk, embedding, meta, idx in zip(chunks, embeddings, metadata_list, chunk_indices)
+            for chunk, embedding, meta, idx in zip(
+                chunks, embeddings, metadata_list, chunk_indices
+            )
         ]
         for i in range(0, len(rows), 50):
-            await client.table("book_chunks").insert(rows[i:i+50]).execute()
+            await client.table("book_chunks").insert(rows[i : i + 50]).execute()
 
     async def similarity_search(
         self,
+        client: AsyncPostgrestClient,
         query_embedding: List[float],
         top_k: int = 5,
         book_id: str = None,
     ) -> List[dict]:
-        client = await get_async_admin_client()
         result = await client.rpc(
             "match_chunks",
             {
