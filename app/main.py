@@ -23,13 +23,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 # Standardize HTTPException
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     return api_error(
         message=exc.detail,
-        status_code=exc.status_code
+        status_code=exc.status_code,
+        headers=exc.headers,
     )
+
 
 # Standardize RequestValidationError (422)
 @app.exception_handler(RequestValidationError)
@@ -38,17 +41,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     if errors:
         # Simplify to first error message
         first_error = errors[0]
-        field = ".".join(str(loc) for loc in first_error.get("loc", []) if loc != "body")
+        field = ".".join(
+            str(loc) for loc in first_error.get("loc", []) if loc != "body"
+        )
         msg = first_error.get("msg", "Validation error")
         error_message = f"Field '{field}' {msg}" if field else msg
     else:
         error_message = "Validation error"
-        
+
     return api_error(
         message=error_message,
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        data=errors # Include full errors in data for debugging/advanced usage
+        data=errors if settings.DEBUG else None,
     )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -65,5 +71,5 @@ app.include_router(api_router, prefix="/api/v1")
 async def health():
     return api_success(
         data={"status": "ok", "service": settings.APP_NAME},
-        message="Service is healthy"
+        message="Service is healthy",
     )

@@ -1,5 +1,17 @@
-from supabase import Client, ClientOptions, create_client, create_async_client, AsyncClient
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from postgrest import AsyncPostgrestClient
+from supabase import (
+    AsyncClient,
+    Client,
+    ClientOptions,
+    create_async_client,
+    create_client,
+)
+
 from app.core.config import settings
+
 
 def create_public_supabase_client() -> Client:
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY)
@@ -14,7 +26,39 @@ def create_auth_supabase_client() -> Client:
         persist_session=False,
         auto_refresh_token=False,
     )
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY, auth_options)
+    return create_client(
+        settings.SUPABASE_URL, settings.SUPABASE_ANON_KEY, auth_options
+    )
+
+
+def reset_admin_auth_header() -> None:
+    """Restore the service-role header before privileged Supabase operations."""
+    supabase_admin.options.headers["Authorization"] = (
+        f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
+    )
+
+
+def create_user_postgrest_client(access_token: str) -> AsyncPostgrestClient:
+    """Create an isolated database client whose queries are enforced by user RLS."""
+    return AsyncPostgrestClient(
+        f"{settings.SUPABASE_URL}/rest/v1",
+        headers={
+            "apikey": settings.SUPABASE_ANON_KEY,
+            "Authorization": f"Bearer {access_token}",
+        },
+        timeout=20,
+    )
+
+
+@asynccontextmanager
+async def user_postgrest_client(
+    access_token: str,
+) -> AsyncIterator[AsyncPostgrestClient]:
+    client = create_user_postgrest_client(access_token)
+    try:
+        yield client
+    finally:
+        await client.aclose()
 
 
 # Respects Row Level Security
@@ -29,6 +73,7 @@ supabase_auth: Client = create_auth_supabase_client()
 
 _async_supabase_admin: AsyncClient | None = None
 
+
 async def get_async_admin_client() -> AsyncClient:
     """
     Returns a singleton async Supabase admin client.
@@ -38,7 +83,7 @@ async def get_async_admin_client() -> AsyncClient:
         _async_supabase_admin = await create_async_client(
             settings.SUPABASE_URL,
             settings.SUPABASE_SERVICE_ROLE_KEY,
-            options=ClientOptions(postgrest_client_timeout=20)
+            options=ClientOptions(postgrest_client_timeout=20),
         )
     return _async_supabase_admin
 

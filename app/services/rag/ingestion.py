@@ -110,6 +110,7 @@ async def ingest_book(book_id: str, file_bytes: bytes | None = None, use_day_chu
             "ingestion_status": "ready",
             "chunk_count": len(chunk_contents),
             "ingested_at": "now()",
+            "published": True
         }).eq("id", book_id).execute()
 
         return {"status": "success", "chunks": len(chunk_contents)}

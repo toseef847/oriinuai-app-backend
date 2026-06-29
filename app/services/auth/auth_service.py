@@ -2,9 +2,17 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from postgrest import AsyncPostgrestClient
+
 from app.core.config import settings
-from app.db.supabase import create_auth_supabase_client, get_public_url, supabase_admin
+from app.db.supabase import (
+    create_auth_supabase_client,
+    get_public_url,
+    reset_admin_auth_header,
+    supabase_admin,
+)
 from app.services.auth.reset_store import create_reset_token, consume_reset_token
+from app.utils.uploads import read_upload_with_limit
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 ALLOWED_IMAGE_CONTENT_TYPES = {
@@ -21,18 +29,23 @@ def _auth_client():
 
 def signup_user(email: str, password: str, full_name: str | None = None) -> dict:
     try:
-        result = _auth_client().auth.sign_up(
-            {
-                "email": email,
-                "password": password,
-                "options": {
-                    "data": {"full_name": full_name} if full_name else {},
-                },
-            }
-        )
+        try:
+            result = _auth_client().auth.sign_up(
+                {
+                    "email": email,
+                    "password": password,
+                    "options": {
+                        "data": {"full_name": full_name} if full_name else {},
+                    },
+                }
+            )
+        finally:
+            reset_admin_auth_header()
         return {
             "user": result.user.dict(exclude_none=True) if result.user else None,
-            "session": result.session.dict(exclude_none=True) if result.session else None,
+            "session": (
+                result.session.dict(exclude_none=True) if result.session else None
+            ),
         }
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -40,16 +53,15 @@ def signup_user(email: str, password: str, full_name: str | None = None) -> dict
 
 def login_user(email: str, password: str) -> dict:
     try:
-        result = _auth_client().auth.sign_in_with_password(
-            {
-                "email": email,
-                "password": password,
-            }
-        )
-
-        # Reset admin auth header in case sign_in_with_password corrupted it
-        from app.core.config import settings
-        supabase_admin.options.headers["Authorization"] = f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"
+        try:
+            result = _auth_client().auth.sign_in_with_password(
+                {
+                    "email": email,
+                    "password": password,
+                }
+            )
+        finally:
+            reset_admin_auth_header()
 
         if not result.user or not result.user.id:
             raise HTTPException(
@@ -66,6 +78,12 @@ def login_user(email: str, password: str) -> dict:
             .execute()
         )
         if profile_res and profile_res.data and profile_res.data[0].get("is_blocked"):
+            if result.session and result.session.access_token:
+                try:
+                    reset_admin_auth_header()
+                    supabase_admin.auth.admin.sign_out(result.session.access_token)
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Your account has been blocked. Contact support for assistance.",
@@ -73,7 +91,9 @@ def login_user(email: str, password: str) -> dict:
 
         return {
             "user": result.user.dict(exclude_none=True) if result.user else None,
-            "session": result.session.dict(exclude_none=True) if result.session else None,
+            "session": (
+                result.session.dict(exclude_none=True) if result.session else None
+            ),
         }
     except HTTPException:
         raise
@@ -84,10 +104,41 @@ def login_user(email: str, password: str) -> dict:
 def refresh_token(refresh_token: str) -> dict:
     try:
         result = _auth_client().auth.refresh_session(refresh_token)
+        reset_admin_auth_header()
+
+        if not result.user or not result.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired authentication token.",
+            )
+
+        profile_res = (
+            supabase_admin.table("profiles")
+            .select("is_blocked")
+            .eq("id", result.user.id)
+            .limit(1)
+            .execute()
+        )
+        if profile_res and profile_res.data and profile_res.data[0].get("is_blocked"):
+            if result.session and result.session.access_token:
+                try:
+                    reset_admin_auth_header()
+                    supabase_admin.auth.admin.sign_out(result.session.access_token)
+                except Exception:
+                    pass
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account has been blocked. Contact support for assistance.",
+            )
+
         return {
             "user": result.user.dict(exclude_none=True) if result.user else None,
-            "session": result.session.dict(exclude_none=True) if result.session else None,
+            "session": (
+                result.session.dict(exclude_none=True) if result.session else None
+            ),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -110,11 +161,18 @@ def forgot_password(email: str) -> dict:
 
 def verify_email_token(email: str, token: str) -> dict:
     try:
-        result = _auth_client().auth.verify_otp({"email": email, "token": token, "type": "signup"})
+        try:
+            result = _auth_client().auth.verify_otp(
+                {"email": email, "token": token, "type": "signup"}
+            )
+        finally:
+            reset_admin_auth_header()
         return {
             "message": "Email verified successfully.",
             "user": result.user.dict(exclude_none=True) if result.user else None,
-            "session": result.session.dict(exclude_none=True) if result.session else None,
+            "session": (
+                result.session.dict(exclude_none=True) if result.session else None
+            ),
         }
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -122,7 +180,12 @@ def verify_email_token(email: str, token: str) -> dict:
 
 def verify_forgot_password_token(email: str, otp_token: str) -> dict:
     try:
-        result = _auth_client().auth.verify_otp({"email": email, "token": otp_token, "type": "recovery"})
+        try:
+            result = _auth_client().auth.verify_otp(
+                {"email": email, "token": otp_token, "type": "recovery"}
+            )
+        finally:
+            reset_admin_auth_header()
         if not result.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,22 +207,24 @@ def verify_forgot_password_token(email: str, otp_token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def update_user_password(user_id: str, current_password: str, new_password: str) -> dict:
+async def update_user_password(
+    user_id: str,
+    current_password: str,
+    new_password: str,
+    client: AsyncPostgrestClient,
+) -> dict:
     try:
         profile_res = (
-            supabase_admin.table("profiles")
-            .select("email")
-            .eq("id", user_id)
-            .limit(1)
-            .execute()
+            client.table("profiles").select("email").eq("id", user_id).limit(1)
         )
-        
+        profile_res = await profile_res.execute()
+
         if not profile_res or not profile_res.data or len(profile_res.data) == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User profile not found.",
             )
-            
+
         profile = profile_res.data[0]
         if not profile.get("email"):
             raise HTTPException(
@@ -176,9 +241,11 @@ def update_user_password(user_id: str, current_password: str, new_password: str)
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Current password is incorrect.",
             )
-            
+        finally:
+            reset_admin_auth_header()
+
         supabase_admin.auth.admin.update_user_by_id(user_id, {"password": new_password})
-        
+
         return {
             "message": "Password updated successfully. Please sign in again with your new password."
         }
@@ -200,21 +267,16 @@ def _resolve_image_extension(filename: str, content_type: str | None) -> str:
     )
 
 
-def update_user_profile(
+async def update_user_profile(
     user_id: str,
+    client: AsyncPostgrestClient,
     full_name: str | None = None,
     bio: str | None = None,
     image: UploadFile | None = None,
 ) -> dict:
     try:
         updates: dict = {}
-
-        if full_name is not None:
-            updates["full_name"] = full_name
-            supabase_admin.auth.admin.update_user_by_id(user_id, {"data": {"full_name": full_name}})
-
-        if bio is not None:
-            updates["bio"] = bio
+        image_upload: tuple[str, bytes] | None = None
 
         if image is not None:
             if not image.content_type or not image.content_type.startswith("image/"):
@@ -223,21 +285,41 @@ def update_user_profile(
                     detail="Uploaded file must be an image.",
                 )
 
-            image_bytes = image.file.read()
+            image_bytes = await read_upload_with_limit(
+                image,
+                settings.MAX_PROFILE_IMAGE_UPLOAD_BYTES,
+                "Profile image",
+            )
             extension = _resolve_image_extension(image.filename, image.content_type)
             storage_path = f"profiles/{user_id}/{uuid4().hex}{extension}"
-            supabase_admin.storage.from_(settings.PROFILE_IMAGE_BUCKET).upload(storage_path, image_bytes)
+            image_upload = (storage_path, image_bytes)
+
+        if full_name is not None:
+            updates["full_name"] = full_name
+            reset_admin_auth_header()
+            supabase_admin.auth.admin.update_user_by_id(
+                user_id, {"data": {"full_name": full_name}}
+            )
+
+        if bio is not None:
+            updates["bio"] = bio
+
+        if image_upload is not None:
+            storage_path, image_bytes = image_upload
+            supabase_admin.storage.from_(settings.PROFILE_IMAGE_BUCKET).upload(
+                storage_path, image_bytes
+            )
             updates["profile_image_path"] = storage_path
 
         if updates:
-            supabase_admin.table("profiles").update(updates).eq("id", user_id).execute()
-            
+            await client.table("profiles").update(updates).eq("id", user_id).execute()
+
             if "profile_image_path" in updates:
                 updates["profile_image_url"] = get_public_url(
                     settings.PROFILE_IMAGE_BUCKET,
                     updates["profile_image_path"],
                 )
-                
+
             return {"message": "Profile updated successfully.", "profile": updates}
 
         return {"message": "No profile changes provided."}
@@ -250,6 +332,7 @@ def update_user_profile(
 def reset_password(access_token: str, password: str) -> dict:
     try:
         user_id = consume_reset_token(access_token)
+        reset_admin_auth_header()
         supabase_admin.auth.admin.update_user_by_id(user_id, {"password": password})
         return {"message": "Password has been reset successfully."}
     except HTTPException:
