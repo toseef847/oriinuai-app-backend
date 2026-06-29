@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints.admin import auth, books, users, plans, insights, profile, transactions
+from app.api.v1.endpoints.admin import auth, books, users, insights, profile, transactions
 
 router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["Admin Auth"])
