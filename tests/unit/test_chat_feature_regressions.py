@@ -20,6 +20,9 @@ class Query:
     def eq(self, *args, **kwargs):
         return self
 
+    def in_(self, *args, **kwargs):
+        return self
+
     def limit(self, *args, **kwargs):
         return self
 

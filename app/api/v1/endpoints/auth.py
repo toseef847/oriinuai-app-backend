@@ -111,9 +111,10 @@ async def get_current_user(
 ):
     sub_res = (
         client.table("subscriptions")
-        .select("*, plans(*)")
+        .select("*")
         .eq("user_id", profile["id"])
-        .eq("status", "active")
+        .in_("status", ["active", "trialing", "past_due"])
+        .order("updated_at", desc=True)
         .limit(1)
     )
     sub_res = await sub_res.execute()
@@ -121,6 +122,19 @@ async def get_current_user(
     subscription = None
     if sub_res and sub_res.data and len(sub_res.data) > 0:
         subscription = sub_res.data[0]
+        plan_id = subscription.get("plan_id")
+        plan = None
+        if plan_id:
+            plan_res = (
+                client.table("plans")
+                .select("*")
+                .eq("id", plan_id)
+                .limit(1)
+            )
+            plan_res = await plan_res.execute()
+            if plan_res and plan_res.data and len(plan_res.data) > 0:
+                plan = plan_res.data[0]
+        subscription["plans"] = plan
 
     profile.update(auth_status)
     return api_success(
