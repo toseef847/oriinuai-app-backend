@@ -177,7 +177,7 @@ def test_transaction_subscription_type_values(admin_token):
     assert response.status_code == 200
     transactions = response.json()["data"]["transactions"]
     for txn in transactions:
-        assert txn["subscription_type"] in ("free", "monthly", "yearly")
+        assert txn["subscription_type"] in ("unknown", "monthly", "yearly")
 
 
 def test_transaction_price_positive(admin_token):

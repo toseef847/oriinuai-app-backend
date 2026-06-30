@@ -36,7 +36,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/15_allow_public_plan_reads.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/17_snapshot_payment_subscription_details.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables
@@ -53,7 +53,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - `chat_messages` - Individual messages
 - `shared_chats` - Public snapshots of chat sessions
 - `usage_logs` - Daily usage tracking
-- `payments` - Stripe invoice payment history
+- `payments` - Stripe invoice payment history with immutable plan, billing interval, and service-period snapshots
 - `password_resets` - One-time password reset tokens (15min expiry)
 - `admins` - Admin user profiles (separate from user profiles; includes `is_blocked`)
 - `admin_logs` - Audit log for admin actions

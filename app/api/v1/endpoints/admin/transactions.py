@@ -7,12 +7,12 @@ from app.utils.response import api_success
 router = APIRouter()
 
 
-def _matches_transaction_search(payment: dict, profile: dict, subscription: dict | None, search: str | None) -> bool:
+def _matches_transaction_search(payment: dict, profile: dict, search: str | None) -> bool:
     if not search:
         return True
 
     normalized = search.strip().lower()
-    package_name = subscription.get("plans", {}).get("display_name", "Foundation") if subscription else "Foundation"
+    package_name = payment.get("package_name") or "Unknown"
     return any(
         normalized in field
         for field in (
@@ -40,7 +40,7 @@ async def list_transactions(
 ):
     # Build base query
     query = supabase_admin.table("payments").select(
-        "id, amount_cents, status, created_at, user_id, profiles(id, full_name, email, profile_image_path, subscriptions(id, billing_interval, created_at, current_period_end, plans(display_name)))"
+        "id, amount_cents, status, created_at, user_id, package_name, billing_interval, period_start, period_end, profiles(id, full_name, email, profile_image_path)"
     )
     
     # Apply filters
@@ -64,18 +64,13 @@ async def list_transactions(
         if not profile:
             continue
             
-        # Get latest subscription
-        subscription = None
-        if profile.get("subscriptions") and len(profile["subscriptions"]) > 0:
-            subscription = profile["subscriptions"][0]
-            
-        package_name = subscription.get("plans", {}).get("display_name", "Foundation") if subscription else "Foundation"
+        package_name = payment.get("package_name") or "Unknown"
         
         # Apply plan filter if provided
         if plan and package_name.lower() != plan.lower():
             continue
 
-        if not _matches_transaction_search(payment, profile, subscription, search):
+        if not _matches_transaction_search(payment, profile, search):
             continue
             
         transaction_data = {
@@ -90,10 +85,10 @@ async def list_transactions(
                 profile.get("profile_image_path"),
             ),
             "package_name": package_name,
-            "started_on": subscription.get("created_at") if subscription else None,
-            "ends_on": subscription.get("current_period_end") if subscription else None,
+            "started_on": payment.get("period_start"),
+            "ends_on": payment.get("period_end"),
             "price": (payment.get("amount_cents") or 0) / 100.0,
-            "subscription_type": subscription.get("billing_interval", "free") if subscription else "free",
+            "subscription_type": payment.get("billing_interval") or "unknown",
             "status": payment.get("status") or "pending",
             "created_at": payment.get("created_at")
         }
