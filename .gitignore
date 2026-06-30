@@ -91,3 +91,5 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
 session-*.md
+MEMORY.md
+SESSION.md
