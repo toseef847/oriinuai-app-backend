@@ -1,6 +1,10 @@
+import logging
 from typing import Any, List
 
 from app.core.config import settings
+from app.services.llm.google_errors import FriendlyGoogleError, translate_google_error
+
+logger = logging.getLogger(__name__)
 
 
 class Embedder:
@@ -42,15 +46,23 @@ class Embedder:
 
             client = self._get_google_client()
             # Use gemini-embedding-2 for better performance and lower quota usage
-            response = client.models.embed_content(
-                model="models/gemini-embedding-2",
-                contents=texts,
-                config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT",
-                    output_dimensionality=self.dimensions,
-                ),
-            )
-            return self._extract_google_embeddings(response, len(texts))
+            try:
+                response = client.models.embed_content(
+                    model="models/gemini-embedding-2",
+                    contents=texts,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        output_dimensionality=self.dimensions,
+                    ),
+                )
+                return self._extract_google_embeddings(response, len(texts))
+            except FriendlyGoogleError:
+                raise
+            except Exception as exception:
+                logger.exception("Google embedding batch failed")
+                raise FriendlyGoogleError(
+                    translate_google_error(exception)
+                ) from exception
 
         elif self.provider == "openai":
             client = self._get_openai_client()
@@ -73,15 +85,23 @@ class Embedder:
             from google.genai import types
 
             client = self._get_google_client()
-            response = client.models.embed_content(
-                model="models/gemini-embedding-2",
-                contents=query,
-                config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_QUERY",
-                    output_dimensionality=self.dimensions,
-                ),
-            )
-            return self._extract_google_embeddings(response, 1)[0]
+            try:
+                response = client.models.embed_content(
+                    model="models/gemini-embedding-2",
+                    contents=query,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_QUERY",
+                        output_dimensionality=self.dimensions,
+                    ),
+                )
+                return self._extract_google_embeddings(response, 1)[0]
+            except FriendlyGoogleError:
+                raise
+            except Exception as exception:
+                logger.exception("Google query embedding failed")
+                raise FriendlyGoogleError(
+                    translate_google_error(exception)
+                ) from exception
         else:
             return self.embed_texts([query])[0]
 

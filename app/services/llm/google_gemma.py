@@ -1,10 +1,14 @@
 import asyncio
+import logging
 from typing import AsyncGenerator
 
 from google import genai
 
 from app.services.llm.base import LLMProvider
+from app.services.llm.google_errors import FriendlyGoogleError, translate_google_error
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleGemmaProvider(LLMProvider):
@@ -44,7 +48,8 @@ class GoogleGemmaProvider(LLMProvider):
                         print(f"Chat rate limit hit. Retrying in {wait_time}s...")
                         await asyncio.sleep(wait_time)
                         continue
-                raise
+                logger.exception("Google generation stream failed")
+                raise FriendlyGoogleError(translate_google_error(e)) from e
 
     async def get_response(
         self,
@@ -73,7 +78,8 @@ class GoogleGemmaProvider(LLMProvider):
                         wait_time = (attempt + 1) * 15
                         await asyncio.sleep(wait_time)
                         continue
-                raise
+                logger.exception("Google generation request failed")
+                raise FriendlyGoogleError(translate_google_error(e)) from e
 
     def _build_prompt(
         self, system_prompt: str, history: list[dict], user_message: str

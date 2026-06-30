@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,6 +20,21 @@ from app.core.config import settings
 from app.core.security import require_admin
 from app.main import app
 from app.utils.uploads import read_upload_with_limit
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_active_plans_have_anon_and_authenticated_read_policy():
+    migration = (PROJECT_ROOT / "sql" / "15_allow_public_plan_reads.sql").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(migration.lower().split())
+
+    assert "alter table public.plans enable row level security" in normalized
+    assert "grant select on table public.plans to anon, authenticated" in normalized
+    assert "for select to anon, authenticated" in normalized
+    assert "using (is_active is true)" in normalized
 
 
 class _ResetQuery:

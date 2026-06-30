@@ -11,18 +11,21 @@ PLAN_LIMITS = {
         "daily_messages": settings.FOUNDATION_DAILY_MESSAGES,
         "rag_chunks": settings.FOUNDATION_RAG_CHUNKS,
         "llm_tier": "free",
+        "max_chat_characters": 2000,
     },
     "core": {
         "plan_name": "core",
         "daily_messages": settings.CORE_DAILY_MESSAGES,
         "rag_chunks": settings.CORE_RAG_CHUNKS,
         "llm_tier": "pro",
+        "max_chat_characters": 4000,
     },
     "inner_circle": {
         "plan_name": "inner_circle",
         "daily_messages": settings.INNER_CIRCLE_DAILY_MESSAGES,
         "rag_chunks": settings.INNER_CIRCLE_RAG_CHUNKS,
         "llm_tier": "elite",
+        "max_chat_characters": 8000,
     },
 }
 
@@ -31,7 +34,7 @@ async def get_user_plan(user_id: str, client: AsyncPostgrestClient) -> dict:
     try:
         result = (
             await client.table("subscriptions")
-            .select("*, plans(name, llm_tier)")
+            .select("plan_id")
             .eq("user_id", user_id)
             .eq("status", "active")
             .limit(1)
@@ -41,11 +44,34 @@ async def get_user_plan(user_id: str, client: AsyncPostgrestClient) -> dict:
         if not result or not result.data or len(result.data) == 0:
             return PLAN_LIMITS["foundation"]
 
-        plan_data = result.data[0]
-        if "plans" in plan_data and plan_data["plans"]:
-            return PLAN_LIMITS.get(
-                plan_data["plans"]["name"], PLAN_LIMITS["foundation"]
+        plan_id = result.data[0].get("plan_id")
+        if not plan_id:
+            return PLAN_LIMITS["foundation"]
+
+        plan_result = (
+            await client.table("plans")
+            .select(
+                "name, daily_message_limit, rag_chunks, llm_tier, max_chat_characters"
             )
+            .eq("id", plan_id)
+            .limit(1)
+            .execute()
+        )
+        if plan_result and plan_result.data:
+            database_plan = plan_result.data[0]
+            fallback = PLAN_LIMITS.get(
+                database_plan.get("name"), PLAN_LIMITS["foundation"]
+            )
+            return {
+                "plan_name": database_plan.get("name", fallback["plan_name"]),
+                "daily_messages": database_plan.get(
+                    "daily_message_limit", fallback["daily_messages"]
+                ),
+                "rag_chunks": database_plan.get("rag_chunks", fallback["rag_chunks"]),
+                "llm_tier": database_plan.get("llm_tier", fallback["llm_tier"]),
+                "max_chat_characters": database_plan.get("max_chat_characters")
+                or fallback["max_chat_characters"],
+            }
 
         return PLAN_LIMITS["foundation"]
     except Exception as e:
@@ -89,6 +115,23 @@ async def check_daily_limit(
         # or handle as you prefer. Here we log and allow.
         print(f"Error checking daily limit: {e}")
         return
+
+
+def check_chat_input_length(text: str, plan: dict, field_name: str) -> None:
+    """Reject user-authored chat text that exceeds the active plan limit."""
+    limit = (
+        plan.get("max_chat_characters")
+        or PLAN_LIMITS["foundation"]["max_chat_characters"]
+    )
+    if len(text) > limit:
+        plan_name = plan.get("plan_name", "foundation")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Field '{field_name}' exceeds the {limit}-character limit "
+                f"for the {plan_name} plan."
+            ),
+        )
 
 
 async def increment_user_usage(user_id: str, tokens: int = 0) -> None:

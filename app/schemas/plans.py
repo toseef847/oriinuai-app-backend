@@ -9,5 +9,6 @@ class PlanResponse(BaseModel):
     daily_message_limit: int
     rag_chunks: int
     llm_tier: str
+    max_chat_characters: int
     stripe_monthly_price_id: str | None = None
     stripe_yearly_price_id: str | None = None

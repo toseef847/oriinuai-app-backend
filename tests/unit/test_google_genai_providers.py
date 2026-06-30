@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services.llm import google_gemma
+from app.services.llm.google_errors import FriendlyGoogleError, translate_google_error
 from app.services.rag.embedder import Embedder
 
 
@@ -117,3 +118,61 @@ async def test_google_provider_uses_async_streaming(monkeypatch) -> None:
 
     assert chunks == ["first ", "second"]
     assert client.aio.models.calls[0]["model"] == "models/gemini-test"
+
+
+@pytest.mark.parametrize(
+    ("code", "provider_status", "expected_status"),
+    [
+        (400, "INVALID_ARGUMENT", 400),
+        (400, "FAILED_PRECONDITION", 403),
+        (403, "PERMISSION_DENIED", 403),
+        (404, "NOT_FOUND", 404),
+        (429, "RESOURCE_EXHAUSTED", 429),
+        (499, "CANCELLED", 499),
+        (500, "INTERNAL", 500),
+        (503, "UNAVAILABLE", 503),
+        (504, "DEADLINE_EXCEEDED", 504),
+    ],
+)
+def test_google_errors_are_sanitized(code, provider_status, expected_status) -> None:
+    exception = SimpleNamespace(
+        code=code,
+        status=provider_status,
+        __str__=lambda: "SECRET provider detail",
+    )
+
+    details = translate_google_error(exception)
+
+    assert details.status_code == expected_status
+    assert "SECRET" not in details.message
+
+
+class FailingAsyncModels:
+    async def generate_content(self, **kwargs):
+        error = RuntimeError("503 UNAVAILABLE: SECRET upstream failure")
+        raise error
+
+    async def generate_content_stream(self, **kwargs):
+        error = RuntimeError("400 INVALID_ARGUMENT: SECRET upstream failure")
+        raise error
+
+
+class FailingGenerationClient:
+    def __init__(self) -> None:
+        self.aio = SimpleNamespace(models=FailingAsyncModels())
+
+
+@pytest.mark.asyncio
+async def test_google_provider_never_exposes_raw_stream_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        google_gemma.genai, "Client", lambda **kwargs: FailingGenerationClient()
+    )
+    provider = google_gemma.GoogleGemmaProvider("models/gemini-test")
+
+    with pytest.raises(FriendlyGoogleError) as captured:
+        _ = [
+            chunk async for chunk in provider.stream_response("system", "question", [])
+        ]
+
+    assert captured.value.status_code == 400
+    assert "SECRET" not in captured.value.user_message
