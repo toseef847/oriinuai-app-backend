@@ -19,7 +19,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Use Row Level Security (RLS) for all Supabase queries
 - **Robust Query Pattern**: Always use `.limit(1).execute()` instead of `.maybe_single()` to handle PostgREST 204 errors safely.
 - **Advanced Interaction**: Utilize the `_stream_chat_response` helper for all LLM interactions, including message edits and response refinements.
-- Maintain the exact folder structure defined in `AGENT_INSTRUCTIONS.md`
+- Preserve the modular folder boundaries documented in this file; update this guide when the structure changes.
 - **Admin API Pattern**: All admin endpoints under `app/api/v1/endpoints/admin/` use `require_admin` or `get_admin_profile` from `app/core/security.py` for authentication.
 - **Admin Auth Service**: Admin-specific auth lives in `app/services/auth/admin_auth_service.py` with email/password login, token refresh, OTP-based password reset, and profile management.
 - **User Blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403.
@@ -36,11 +36,12 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/11_create_admin_logs_table.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/15_allow_public_plan_reads.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables
 - **Search Logic**: Use the `search_chat_sessions` RPC for cross-table searching of titles and messages.
+- Security migrations hash password-reset tokens, retain payment history safely, enforce plan-based chat character limits, and permit public reads of active plans.
 
 **Key Tables**:
 - `profiles` - User profiles (includes `bio` and `profile_image_path`)
@@ -67,6 +68,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 - Terminology: Always use African Sacred Science™ terminology correctly
 - Embeddings: Google gemini-embedding-2 (768 dimensions)
 - **Throttling**: Must use 15s delays between batches of 20 chunks during ingestion to stay under 30k TPM limit.
+- Google provider failures must be translated through `app/services/llm/google_errors.py`; do not expose upstream provider details to API clients.
 - Vector search: Cosine similarity via pgvector
 - Avoid: Large, monolithic chunks that dilute context relevance
 - **STRICT ADVICE BOUNDARY**: Personal/life guidance must be grounded exclusively in RAG context; general platform/tradition questions can use internal knowledge
@@ -112,9 +114,11 @@ pytest --cov=app --cov-report=html
 - Virtual environment with `venv`
 - Install from `requirements.txt` (exact versions)
 - Environment variables from `.env` file
-- Redis remains optional for caching or other future uses; no custom in-app general admin throttling is required.
+- Redis backs fail-open throttling for authentication and password-change operations. A Redis outage is logged but does not make authentication unavailable.
+- No custom in-app general admin throttling is required; apply broader limits at the edge/cloud layer.
 - Supabase for database and storage
 - **Vercel deployment**: Entry point is `api/index.py` which re-exports `app.main.app`; configured via `vercel.json` with `@vercel/python` builder
+- **Docker deployment**: `Dockerfile` uses Python 3.13.3, runs as a non-root user, and starts Uvicorn on port 8000.
 
 **Development Setup**:
 ```bash
@@ -131,7 +135,7 @@ uvicorn app.main:app --reload --port 8000
 **Instructions**:
 - Keep `README.md` updated with setup instructions
 - Document all API endpoints with proper FastAPI docstrings
-- Maintain changelog in `AGENT_INSTRUCTIONS_V2.md`
+- Record the current work in `SESSION.md` and durable implementation knowledge in `MEMORY.md`.
 - Add type hints to all functions
 - Use descriptive variable names
 
@@ -150,7 +154,8 @@ uvicorn app.main:app --reload --port 8000
 - **Standardized Response Pattern**: All endpoints must return the `ApiResponse` envelope: `{ "status": int, "message": str, "data": Any | null }` using helpers from `app/utils/response.py`.
 - **Validation Errors**: Standardized 422 errors return a simplified message string instead of nested arrays.
 - Authentication via JWT tokens
-- Edge/cloud rate limiting may be applied externally; keep usage tracking in the app layer.
+- Auth and password-change endpoints use Redis-backed, fail-open throttling; broader edge/cloud rate limiting may be applied externally. Keep plan usage tracking in the app layer.
+- Chat input length is constrained by the active plan's `chat_character_limit`.
 
 ### Database Standards
 - Use Supabase RPC functions for complex queries
@@ -189,7 +194,7 @@ Required for development:
 - `OPENAI_API_KEY` (fallback)
 - `FRONTEND_URL` (for Stripe checkout and billing portal redirects)
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (for payments; price IDs should live in `public.plans` first)
-- `REDIS_URL` (optional; only needed for Redis-backed features)
+- `REDIS_URL`, `REDIS_TIMEOUT_SECONDS`, `AUTH_RATE_LIMIT_ATTEMPTS`, `AUTH_RATE_LIMIT_WINDOW_SECONDS` (auth/password-change throttling; fails open if unavailable)
 - `ADMIN_IMAGE_BUCKET` (optional, defaults to `PROFILE_IMAGE_BUCKET`)
 
 ## Key Files & Directories
@@ -244,6 +249,7 @@ tests/
     ├── test_admin_insights.py # Dashboard analytics tests
     └── test_admin_transactions.py # Transaction listing tests
 scripts/                 # Utility scripts
+Dockerfile               # Python 3.13.3 production container
 ```
 
 ## Auth Architecture (OTP flows)
@@ -264,6 +270,8 @@ scripts/                 # Utility scripts
 - **User blocking**: `get_current_profile()` in `app/core/security.py` checks `profiles.is_blocked` and rejects blocked users with 403; admin blocking endpoints at `/admin/users/{id}/block` and `/admin/users/{id}/unblock`
 - **Admin and user images**: Public URLs are generated for profile payloads when buckets are public; signed URL helpers remain available for private-bucket use.
 - **Admin search**: Admin user and transaction list endpoints support keyword search.
+- **Security hardening**: Reset tokens are stored as hashes, blocked users cannot refresh sessions, uploads are size-limited, and provider errors return safe client-facing messages.
+- **Plan limits**: Active plans expose `chat_character_limit`; chat creation, editing, and refinement enforce it through the shared streaming path.
 
 ## Communication Guidelines
 

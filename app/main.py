@@ -18,7 +18,7 @@ app = FastAPI(
     title=f"{settings.APP_NAME} API",
     version="1.0.0",
     description="African Sacred Science™ AI — Backend API",
-    docs_url="/docs" if settings.DEBUG else None,
+    docs_url="/docs",
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan,
 )
