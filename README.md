@@ -18,7 +18,9 @@ Auth endpoints use Redis-backed rate limiting. If Redis is temporarily unavailab
 authentication remains available and the outage is logged.
 
 Apply the numbered SQL files in order through the Supabase SQL Editor, including
-`sql/12_security_hardening.sql` for hashed reset tokens and retained payment history.
+`sql/13_security_hardening.sql` for hashed reset tokens and retained payment history,
+`sql/14_add_chat_character_limits.sql` for plan-based chat input limits, and
+`sql/15_allow_public_plan_reads.sql` for active-plan API access.
 
 3. Run the app locally:
 

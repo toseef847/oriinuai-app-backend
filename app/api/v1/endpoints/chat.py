@@ -5,12 +5,14 @@ from postgrest import AsyncPostgrestClient
 from pydantic import BaseModel
 from app.core.security import get_current_access_token, get_current_user_id, get_user_db
 from app.services.plan_service import (
+    check_chat_input_length,
     check_daily_limit,
     get_user_plan,
     increment_user_usage,
 )
 from app.services.rag.query import build_rag_prompt
 from app.services.llm.factory import get_llm_provider
+from app.services.llm.google_errors import FriendlyGoogleError
 from app.db.supabase import user_postgrest_client
 from app.utils.response import api_success
 from app.schemas.chat import (
@@ -232,11 +234,17 @@ async def _stream_chat_response(
     """Internal helper to build RAG prompt and stream LLM response."""
 
     # 1. Build RAG prompt
-    system_prompt, _ = await build_rag_prompt(
-        user_message=user_message,
-        client=client,
-        top_k=plan["rag_chunks"],
-    )
+    try:
+        system_prompt, _ = await build_rag_prompt(
+            user_message=user_message,
+            client=client,
+            top_k=plan["rag_chunks"],
+        )
+    except FriendlyGoogleError as exception:
+        raise HTTPException(
+            status_code=exception.status_code,
+            detail=exception.user_message,
+        ) from exception
 
     # 2. Get conversation history
     history_result = (
@@ -268,11 +276,15 @@ async def _stream_chat_response(
         if is_new_session:
             yield f"data: {json.dumps({'type': 'session_id', 'session_id': str(session_id)})}\n\n"
 
-        async for token in llm.stream_response(
-            system_prompt, actual_user_message, history
-        ):
-            full_response.append(token)
-            yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+        try:
+            async for token in llm.stream_response(
+                system_prompt, actual_user_message, history
+            ):
+                full_response.append(token)
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+        except FriendlyGoogleError as exception:
+            yield f"data: {json.dumps({'type': 'error', 'status': exception.status_code, 'message': exception.user_message})}\n\n"
+            return
 
         complete = "".join(full_response)
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -310,6 +322,7 @@ async def chat(
     client: AsyncPostgrestClient = Depends(get_user_db),
 ):
     plan = await get_user_plan(user_id, client)
+    check_chat_input_length(request.message, plan, "message")
     await check_daily_limit(user_id, client, plan.get("plan_name", "foundation"))
 
     session_id = request.session_id
@@ -365,6 +378,7 @@ async def edit_message(
 ):
     """Edit a user message, truncate subsequent history, and regenerate response."""
     plan = await get_user_plan(user_id, client)
+    check_chat_input_length(request.content, plan, "content")
     await check_daily_limit(user_id, client, plan.get("plan_name", "foundation"))
 
     # 1. Verify message ownership and role
@@ -415,6 +429,7 @@ async def refine_response(
 ):
     """Refine the last assistant response based on instructions."""
     plan = await get_user_plan(user_id, client)
+    check_chat_input_length(request.instructions, plan, "instructions")
     await check_daily_limit(user_id, client, plan.get("plan_name", "foundation"))
 
     # 1. Verify session ownership
