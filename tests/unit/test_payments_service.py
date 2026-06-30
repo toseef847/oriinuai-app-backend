@@ -888,6 +888,65 @@ def test_change_subscription_plan_upgrades_paid_subscription_via_portal(monkeypa
     assert captured["flow_data"]["subscription_update"]["subscription"] == "sub_123"
 
 
+def test_change_subscription_plan_allows_yearly_to_monthly_for_same_plan(
+    monkeypatch,
+):
+    fake_client = _FakeTableClient()
+    fake_client.responses["plans"] = [
+        {
+            "id": "plan-inner",
+            "name": "inner_circle",
+            "display_name": "Inner Circle",
+            "stripe_monthly_price_id": "price_inner_monthly",
+            "stripe_yearly_price_id": "price_inner_yearly",
+            "is_active": True,
+        }
+    ]
+    fake_client.responses["subscriptions"] = [
+        {
+            "id": "sub-row-1",
+            "user_id": "user-1",
+            "status": "active",
+            "billing_interval": "yearly",
+            "plan_id": "plan-inner",
+            "stripe_customer_id": "cus_123",
+            "stripe_sub_id": "sub_123",
+            "plans": {"name": "inner_circle"},
+        }
+    ]
+
+    monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
+    monkeypatch.setattr(stripe_service.settings, "STRIPE_SECRET_KEY", "sk_test")
+    captured = {}
+
+    class FakePortalSession:
+        @staticmethod
+        def create(**kwargs):
+            captured.update(kwargs)
+            return type(
+                "Session",
+                (),
+                {"url": "https://billing.test/session", "id": "bps_test"},
+            )()
+
+    monkeypatch.setattr(
+        stripe_service.stripe.billing_portal, "Session", FakePortalSession
+    )
+
+    result = stripe_service.change_subscription_plan(
+        user_id="user-1",
+        email="user@example.com",
+        plan_name="inner_circle",
+        billing_interval="monthly",
+    )
+
+    assert result["kind"] == "checkout"
+    assert result["checkout_url"] == "https://billing.test/session"
+    assert result["plan"]["name"] == "inner_circle"
+    assert captured["flow_data"]["type"] == "subscription_update"
+    assert captured["flow_data"]["subscription_update"]["subscription"] == "sub_123"
+
+
 def test_change_subscription_plan_handles_disabled_portal_updates(monkeypatch):
     fake_client = _FakeTableClient()
     fake_client.responses["plans"] = [
