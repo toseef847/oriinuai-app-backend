@@ -1,4 +1,5 @@
-from typing import List
+from typing import Any, List
+
 from app.core.config import settings
 
 
@@ -19,30 +20,37 @@ class Embedder:
 
     def _get_google_client(self):
         if self._google_client is None:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GOOGLE_AI_STUDIO_KEY)
-            self._google_client = genai
+            from google import genai
+
+            self._google_client = genai.Client(api_key=settings.GOOGLE_AI_STUDIO_KEY)
         return self._google_client
 
     def _get_openai_client(self):
         if self._openai_client is None:
             from openai import OpenAI
+
             self._openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
         return self._openai_client
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Embed a batch of texts. Returns list of float vectors."""
         if self.provider == "google":
-            genai = self._get_google_client()
+            if not texts:
+                return []
+
+            from google.genai import types
+
+            client = self._get_google_client()
             # Use gemini-embedding-2 for better performance and lower quota usage
-            result = genai.embed_content(
+            response = client.models.embed_content(
                 model="models/gemini-embedding-2",
-                content=texts,
-                task_type="retrieval_document",
-                output_dimensionality=self.dimensions,
+                contents=texts,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_DOCUMENT",
+                    output_dimensionality=self.dimensions,
+                ),
             )
-            # When 'content' is a list, 'embedding' is a list of vectors
-            return result["embedding"]
+            return self._extract_google_embeddings(response, len(texts))
 
         elif self.provider == "openai":
             client = self._get_openai_client()
@@ -62,16 +70,38 @@ class Embedder:
     def embed_query(self, query: str) -> List[float]:
         """Embed a single query string for similarity search."""
         if self.provider == "google":
-            genai = self._get_google_client()
-            result = genai.embed_content(
+            from google.genai import types
+
+            client = self._get_google_client()
+            response = client.models.embed_content(
                 model="models/gemini-embedding-2",
-                content=query,
-                task_type="retrieval_query",
-                output_dimensionality=self.dimensions,
+                contents=query,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_QUERY",
+                    output_dimensionality=self.dimensions,
+                ),
             )
-            return result["embedding"]
+            return self._extract_google_embeddings(response, 1)[0]
         else:
             return self.embed_texts([query])[0]
+
+    @staticmethod
+    def _extract_google_embeddings(
+        response: Any, expected_count: int
+    ) -> List[List[float]]:
+        embeddings = response.embeddings or []
+        if len(embeddings) != expected_count:
+            raise ValueError(
+                "Google returned an unexpected number of embeddings: "
+                f"expected {expected_count}, received {len(embeddings)}."
+            )
+
+        vectors: List[List[float]] = []
+        for index, embedding in enumerate(embeddings):
+            if embedding.values is None:
+                raise ValueError(f"Google returned no values for embedding {index}.")
+            vectors.append(embedding.values)
+        return vectors
 
 
 embedder = Embedder()
