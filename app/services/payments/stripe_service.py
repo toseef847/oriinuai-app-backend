@@ -494,6 +494,21 @@ def _subscription_billing_interval(subscription: dict[str, Any]) -> str | None:
     )
 
 
+def _billing_interval_for_plan_price(plan: dict[str, Any], price_id: str) -> str | None:
+    plan_name = plan.get("name", "")
+    monthly_price_id = plan.get("stripe_monthly_price_id") or _env_price_id(
+        plan_name, "monthly"
+    )
+    yearly_price_id = plan.get("stripe_yearly_price_id") or _env_price_id(
+        plan_name, "yearly"
+    )
+    if price_id == monthly_price_id:
+        return "monthly"
+    if price_id == yearly_price_id:
+        return "yearly"
+    return None
+
+
 def _retrieved_invoice_from_reference(invoice_reference: Any) -> dict[str, Any]:
     if (
         isinstance(invoice_reference, dict)
@@ -625,6 +640,11 @@ def _upsert_subscription_row(
     if current_period_end_iso:
         payload["current_period_end"] = current_period_end_iso
 
+    if "cancel_at_period_end" in sub_data:
+        payload["cancel_at_period_end"] = bool(sub_data.get("cancel_at_period_end"))
+    if "cancel_at" in sub_data:
+        payload["cancel_at"] = _timestamp_to_iso(sub_data.get("cancel_at"))
+
     # Find existing record to update
     existing = None
     if stripe_sub_id:
@@ -646,6 +666,97 @@ def _upsert_subscription_row(
         # Cannot update (no existing record) and cannot create (no plan_id)
         return payload
 
+    return result.data[0] if result.data else payload
+
+
+def _schedule_subscription_id(schedule: dict[str, Any]) -> str | None:
+    return _stripe_object_id(schedule.get("subscription")) or _stripe_object_id(
+        schedule.get("released_subscription")
+    )
+
+
+def _clear_subscription_schedule(schedule: dict[str, Any]) -> None:
+    stripe_sub_id = _schedule_subscription_id(schedule)
+    if not stripe_sub_id:
+        return
+    existing = _latest_subscription_for_stripe_id(stripe_sub_id)
+    if not existing:
+        return
+    (
+        supabase_admin.table("subscriptions")
+        .update(
+            {
+                "stripe_schedule_id": None,
+                "pending_plan_id": None,
+                "pending_billing_interval": None,
+                "pending_effective_at": None,
+            }
+        )
+        .eq("id", existing["id"])
+        .execute()
+    )
+
+
+def _upsert_subscription_schedule(schedule: Any) -> dict[str, Any] | None:
+    schedule_data = (
+        schedule
+        if isinstance(schedule, dict)
+        else getattr(schedule, "to_dict", lambda: {})()
+    )
+    if schedule_data.get("status") in {"canceled", "completed", "released"}:
+        _clear_subscription_schedule(schedule_data)
+        return None
+
+    stripe_sub_id = _schedule_subscription_id(schedule_data)
+    if not stripe_sub_id:
+        return None
+    existing = _latest_subscription_for_stripe_id(stripe_sub_id)
+    if not existing:
+        logger.warning(
+            "Ignoring subscription schedule %s without a local subscription",
+            schedule_data.get("id"),
+        )
+        return None
+
+    current_phase = schedule_data.get("current_phase") or {}
+    effective_at = current_phase.get("end_date")
+    phases = schedule_data.get("phases") or []
+    next_phase = next(
+        (
+            phase
+            for phase in phases
+            if effective_at and phase.get("start_date") == effective_at
+        ),
+        None,
+    )
+
+    payload: dict[str, Any] = {
+        "stripe_schedule_id": _stripe_object_id(schedule_data.get("id")),
+        "pending_plan_id": None,
+        "pending_billing_interval": None,
+        "pending_effective_at": None,
+    }
+    if next_phase:
+        items = next_phase.get("items") or []
+        price_id = _stripe_object_id(items[0].get("price")) if items else None
+        if price_id:
+            plan = _find_plan_by_price_id(price_id)
+            payload.update(
+                {
+                    "pending_plan_id": plan["id"],
+                    "pending_billing_interval": _billing_interval_for_plan_price(
+                        plan, price_id
+                    ),
+                    "pending_effective_at": _timestamp_to_iso(effective_at),
+                }
+            )
+
+    result = (
+        supabase_admin.table("subscriptions")
+        .update(payload)
+        .eq("id", existing["id"])
+        .execute()
+    )
     return result.data[0] if result.data else payload
 
 
@@ -738,16 +849,7 @@ def _invoice_subscription_snapshot(
 
     interval = None
     if plan and price_id:
-        if price_id == (
-            plan.get("stripe_monthly_price_id")
-            or _env_price_id(plan.get("name", ""), "monthly")
-        ):
-            interval = "monthly"
-        elif price_id == (
-            plan.get("stripe_yearly_price_id")
-            or _env_price_id(plan.get("name", ""), "yearly")
-        ):
-            interval = "yearly"
+        interval = _billing_interval_for_plan_price(plan, price_id)
     recurring = price.get("recurring") if isinstance(price, dict) else None
     if interval is None and isinstance(recurring, dict):
         stripe_interval = recurring.get("interval")
@@ -932,6 +1034,18 @@ def handle_webhook_event(payload: str, signature: str) -> dict[str, Any]:
         _upsert_subscription_row(event_object)
     elif event_type == "customer.subscription.deleted":
         _cancel_subscription_row(event_object)
+    elif event_type in {
+        "subscription_schedule.created",
+        "subscription_schedule.updated",
+    }:
+        _upsert_subscription_schedule(event_object)
+    elif event_type in {
+        "subscription_schedule.aborted",
+        "subscription_schedule.canceled",
+        "subscription_schedule.completed",
+        "subscription_schedule.released",
+    }:
+        _clear_subscription_schedule(event_object)
     elif event_type in {"invoice.paid", "invoice.payment_succeeded"}:
         _upsert_payment_from_invoice(event_object)
     elif event_type == "invoice_payment.paid":

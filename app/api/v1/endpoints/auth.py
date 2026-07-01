@@ -136,6 +136,34 @@ async def get_current_user(
                 plan = plan_res.data[0]
         subscription["plans"] = plan
 
+        pending_change = None
+        if subscription.get("cancel_at_period_end") or subscription.get("cancel_at"):
+            pending_change = {
+                "type": "cancellation",
+                "effective_at": subscription.get("cancel_at")
+                or subscription.get("current_period_end"),
+            }
+        elif subscription.get("pending_effective_at"):
+            pending_plan = None
+            pending_plan_id = subscription.get("pending_plan_id")
+            if pending_plan_id:
+                pending_plan_res = (
+                    client.table("plans")
+                    .select("*")
+                    .eq("id", pending_plan_id)
+                    .limit(1)
+                )
+                pending_plan_res = await pending_plan_res.execute()
+                if pending_plan_res and pending_plan_res.data:
+                    pending_plan = pending_plan_res.data[0]
+            pending_change = {
+                "type": "plan_change",
+                "effective_at": subscription.get("pending_effective_at"),
+                "billing_interval": subscription.get("pending_billing_interval"),
+                "plan": pending_plan,
+            }
+        subscription["pending_change"] = pending_change
+
     profile.update(auth_status)
     return api_success(
         data={

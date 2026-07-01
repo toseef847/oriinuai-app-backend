@@ -85,6 +85,81 @@ async def test_me_sets_plan_to_none_for_invalid_reference() -> None:
     assert payload["data"]["subscription"]["plans"] is None
 
 
+@pytest.mark.asyncio
+async def test_me_exposes_scheduled_billing_interval_change() -> None:
+    plan_id = str(uuid4())
+    client = TableClient(
+        {
+            "subscriptions": [
+                {
+                    "id": "subscription-id",
+                    "plan_id": plan_id,
+                    "pending_plan_id": plan_id,
+                    "pending_billing_interval": "monthly",
+                    "pending_effective_at": "2027-06-30T22:17:59+00:00",
+                    "cancel_at_period_end": False,
+                    "cancel_at": None,
+                }
+            ],
+            "plans": [
+                {"id": plan_id, "name": "inner_circle", "display_name": "Inner Circle"}
+            ],
+        }
+    )
+
+    response = await auth.get_current_user(
+        profile={"id": "user-id"}, auth_status={}, client=client
+    )
+    pending_change = json.loads(response.body)["data"]["subscription"][
+        "pending_change"
+    ]
+
+    assert pending_change == {
+        "type": "plan_change",
+        "effective_at": "2027-06-30T22:17:59+00:00",
+        "billing_interval": "monthly",
+        "plan": {
+            "id": plan_id,
+            "name": "inner_circle",
+            "display_name": "Inner Circle",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_me_prioritizes_scheduled_cancellation() -> None:
+    plan_id = str(uuid4())
+    client = TableClient(
+        {
+            "subscriptions": [
+                {
+                    "id": "subscription-id",
+                    "plan_id": plan_id,
+                    "current_period_end": "2027-06-30T22:17:59+00:00",
+                    "pending_plan_id": plan_id,
+                    "pending_billing_interval": "monthly",
+                    "pending_effective_at": "2027-06-30T22:17:59+00:00",
+                    "cancel_at_period_end": True,
+                    "cancel_at": None,
+                }
+            ],
+            "plans": [{"id": plan_id, "name": "inner_circle"}],
+        }
+    )
+
+    response = await auth.get_current_user(
+        profile={"id": "user-id"}, auth_status={}, client=client
+    )
+    pending_change = json.loads(response.body)["data"]["subscription"][
+        "pending_change"
+    ]
+
+    assert pending_change == {
+        "type": "cancellation",
+        "effective_at": "2027-06-30T22:17:59+00:00",
+    }
+
+
 class FailingProvider:
     async def stream_response(self, *args, **kwargs):
         if False:

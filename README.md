@@ -260,6 +260,12 @@ stripe_customer_id   TEXT
 stripe_sub_id        TEXT  UNIQUE
 status               ENUM  (active | cancelled | past_due | trialing)
 current_period_end   TIMESTAMPTZ
+stripe_schedule_id   TEXT
+pending_plan_id      UUID  →  plans.id
+pending_billing_interval ENUM  (monthly | yearly | free)
+pending_effective_at TIMESTAMPTZ
+cancel_at_period_end BOOL
+cancel_at            TIMESTAMPTZ
 created_at           TIMESTAMPTZ
 updated_at           TIMESTAMPTZ
 ```
@@ -634,6 +640,8 @@ Client                 FastAPI                  Stripe              Webhook
 | `customer.subscription.created` | Upsert subscription record |
 | `customer.subscription.updated` | Update status, period_end, plan |
 | `customer.subscription.deleted` | Set status = "cancelled" |
+| `subscription_schedule.created`, `.updated` | Persist a pending plan or interval change |
+| `subscription_schedule.aborted`, `.canceled`, `.completed`, `.released` | Clear completed or abandoned pending changes |
 | `invoice.paid` | Create payment record |
 | `invoice.payment_failed` | Set subscription status = "past_due" |
 
@@ -1179,6 +1187,9 @@ For Stripe webhooks, configure the webhook endpoint in your Stripe Dashboard to:
 ```
 https://your-vercel-domain.vercel.app/api/v1/payments/webhook
 ```
+
+Subscribe that endpoint to the checkout, customer subscription, subscription
+schedule, and invoice events listed in **Webhook Events Handled** above.
 
 ### Local Production Mode
 

@@ -36,7 +36,7 @@ The backend is built with FastAPI, uses Supabase for database and vector storage
 
 **Instructions**:
 - Use Supabase SQL Editor for all schema changes
-- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/17_snapshot_payment_subscription_details.sql`
+- Run SQL files in numerical order: `sql/01_enable_pgvector.sql` → `sql/18_track_pending_subscription_changes.sql`
 - All SQL files must be idempotent (`CREATE IF NOT EXISTS`, `CREATE OR REPLACE`)
 - Vector operations use `vector(768)` for Google gemini-embedding-2
 - Maintain Row Level Security policies for all tables

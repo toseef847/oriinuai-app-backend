@@ -281,6 +281,96 @@ def test_handle_webhook_event_accepts_signed_payload(monkeypatch):
     assert result["event_type"] == "customer.subscription.updated"
 
 
+def test_subscription_update_tracks_pending_cancellation(monkeypatch):
+    fake_client = _FakeTableClient()
+    fake_client.responses["subscriptions"] = [
+        {"id": "row-1", "user_id": "user-1", "stripe_sub_id": "sub_123"}
+    ]
+    monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
+
+    stripe_service._upsert_subscription_row(
+        {
+            "id": "sub_123",
+            "customer": "cus_123",
+            "status": "active",
+            "cancel_at_period_end": True,
+            "cancel_at": 1712678400,
+        }
+    )
+
+    payload = fake_client.last_query_by_name["subscriptions"].last_payload
+    assert payload["cancel_at_period_end"] is True
+    assert payload["cancel_at"] == "2024-04-09T16:00:00+00:00"
+
+
+def test_subscription_schedule_tracks_future_plan_change(monkeypatch):
+    fake_client = _FakeTableClient()
+    fake_client.responses["subscriptions"] = [
+        {"id": "row-1", "user_id": "user-1", "stripe_sub_id": "sub_123"}
+    ]
+    fake_client.responses["plans"] = [
+        {
+            "id": "plan-inner",
+            "name": "inner_circle",
+            "display_name": "Inner Circle",
+            "stripe_monthly_price_id": "price_inner_monthly",
+            "stripe_yearly_price_id": "price_inner_yearly",
+        }
+    ]
+    monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
+
+    stripe_service._upsert_subscription_schedule(
+        {
+            "id": "sub_sched_123",
+            "status": "active",
+            "subscription": "sub_123",
+            "current_phase": {"start_date": 1681142400, "end_date": 1712678400},
+            "phases": [
+                {
+                    "start_date": 1681142400,
+                    "end_date": 1712678400,
+                    "items": [{"price": "price_inner_yearly"}],
+                },
+                {
+                    "start_date": 1712678400,
+                    "end_date": 1715270400,
+                    "items": [{"price": "price_inner_monthly"}],
+                },
+            ],
+        }
+    )
+
+    payload = fake_client.last_query_by_name["subscriptions"].last_payload
+    assert payload["stripe_schedule_id"] == "sub_sched_123"
+    assert payload["pending_plan_id"] == "plan-inner"
+    assert payload["pending_billing_interval"] == "monthly"
+    assert payload["pending_effective_at"] == "2024-04-09T16:00:00+00:00"
+
+
+def test_terminal_subscription_schedule_clears_pending_change(monkeypatch):
+    fake_client = _FakeTableClient()
+    fake_client.responses["subscriptions"] = [
+        {"id": "row-1", "user_id": "user-1", "stripe_sub_id": "sub_123"}
+    ]
+    monkeypatch.setattr(stripe_service, "supabase_admin", fake_client)
+
+    stripe_service._clear_subscription_schedule(
+        {
+            "id": "sub_sched_123",
+            "status": "released",
+            "released_subscription": "sub_123",
+        }
+    )
+
+    payload = fake_client.last_query_by_name["subscriptions"].last_payload
+    assert payload == {
+        "stripe_schedule_id": None,
+        "pending_plan_id": None,
+        "pending_billing_interval": None,
+        "pending_effective_at": None,
+    }
+
+
 @pytest.mark.parametrize(
     "event_type",
     ["checkout.session.completed", "checkout.session.async_payment_succeeded"],
