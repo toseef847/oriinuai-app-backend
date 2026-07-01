@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from app.services.plan_service import (
     PLAN_LIMITS,
     check_chat_input_length,
+    estimate_chat_tokens,
     get_user_plan,
 )
 
@@ -26,6 +27,20 @@ def test_chat_input_rejects_limit_plus_one() -> None:
     assert captured.value.status_code == 422
     assert "4000-character limit" in captured.value.detail
     assert "core plan" in captured.value.detail
+
+
+def test_estimate_chat_tokens_counts_prompt_history_and_completion() -> None:
+    tokens = estimate_chat_tokens(
+        system_prompt="system prompt",
+        user_message="question",
+        conversation_history=[
+            {"role": "user", "content": "previous question"},
+            {"role": "assistant", "content": "previous answer"},
+        ],
+        assistant_response="current answer",
+    )
+
+    assert tokens > 0
 
 
 @pytest.mark.asyncio

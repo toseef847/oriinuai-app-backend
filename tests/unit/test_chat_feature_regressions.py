@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -39,6 +40,47 @@ class TableClient:
 
     def table(self, name):
         return Query(self.table_data.get(name, []))
+
+
+class RecordingQuery:
+    def __init__(self, calls, table_name, operation, payload):
+        self.calls = calls
+        self.table_name = table_name
+        self.operation = operation
+        self.payload = payload
+
+    def eq(self, *args, **kwargs):
+        return self
+
+    async def execute(self):
+        self.calls.append((self.operation, self.table_name, self.payload))
+        return SimpleNamespace(data=[])
+
+
+class RecordingTable:
+    def __init__(self, calls, table_name):
+        self.calls = calls
+        self.table_name = table_name
+
+    def insert(self, *args, **kwargs):
+        return RecordingQuery(self.calls, self.table_name, "insert", args[0])
+
+    def update(self, *args, **kwargs):
+        return RecordingQuery(self.calls, self.table_name, "update", args[0])
+
+
+class RecordingStreamClient:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def table(self, name):
+        return RecordingTable(self.calls, name)
+
+
+class SuccessfulProvider:
+    async def stream_response(self, *args, **kwargs):
+        yield "Ori"
+        yield "inu"
 
 
 @pytest.mark.asyncio
@@ -102,6 +144,8 @@ async def test_stream_emits_terminal_sanitized_google_error(monkeypatch) -> None
         AsyncMock(return_value=("system prompt", [])),
     )
     monkeypatch.setattr(chat, "get_llm_provider", lambda **kwargs: FailingProvider())
+    increment_usage = AsyncMock()
+    monkeypatch.setattr(chat, "increment_user_usage", increment_usage)
     client = TableClient({"chat_messages": []})
 
     response = await chat._stream_chat_response(
@@ -121,6 +165,58 @@ async def test_stream_emits_terminal_sanitized_google_error(monkeypatch) -> None
     assert '"status": 503' in body
     assert '"type": "done"' not in body
     assert '"type": "token"' not in body
+    increment_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stream_persists_and_increments_usage_before_done(monkeypatch) -> None:
+    calls = []
+
+    @asynccontextmanager
+    async def fake_user_postgrest_client(access_token):
+        assert access_token == "token"
+        yield RecordingStreamClient(calls)
+
+    async def fake_increment_user_usage(user_id, tokens=0):
+        assert user_id == "user-id"
+        calls.append(("usage", tokens))
+
+    monkeypatch.setattr(
+        chat,
+        "build_rag_prompt",
+        AsyncMock(return_value=("system prompt", [])),
+    )
+    monkeypatch.setattr(chat, "get_llm_provider", lambda **kwargs: SuccessfulProvider())
+    monkeypatch.setattr(chat, "user_postgrest_client", fake_user_postgrest_client)
+    monkeypatch.setattr(chat, "increment_user_usage", fake_increment_user_usage)
+
+    response = await chat._stream_chat_response(
+        user_id="user-id",
+        session_id=uuid4(),
+        user_message="question",
+        plan={"rag_chunks": 2, "llm_tier": "free"},
+        client=TableClient({"chat_messages": []}),
+        access_token="token",
+    )
+
+    chunks = []
+    async for chunk in response.body_iterator:
+        text = chunk.decode() if isinstance(chunk, bytes) else chunk
+        chunks.append(text)
+        if '"type": "done"' in text:
+            assert calls[0][0:2] == ("insert", "chat_messages")
+            assert calls[0][2]["tokens_used"] > 0
+            assert calls[1] == (
+                "update",
+                "chat_sessions",
+                {"updated_at": "now()"},
+            )
+            assert calls[2] == ("usage", calls[0][2]["tokens_used"])
+
+    body = "".join(chunks)
+    assert '"type": "token", "content": "Ori"' in body
+    assert '"type": "token", "content": "inu"' in body
+    assert '"type": "done"' in body
 
 
 @pytest.mark.asyncio
