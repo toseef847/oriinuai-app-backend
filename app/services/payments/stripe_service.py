@@ -335,7 +335,10 @@ def _can_change_subscription_plan(
     if target_rank < current_rank:
         return False
 
-    return current_billing_interval == "monthly" and target_billing_interval == "yearly"
+    # Stripe Customer Portal handles billing-cycle changes and applies the
+    # configured proration/scheduling behavior. Both monthly -> yearly and
+    # yearly -> monthly are valid when the plan tier itself is unchanged.
+    return current_billing_interval != target_billing_interval
 
 
 def change_subscription_plan(
@@ -407,7 +410,8 @@ def change_subscription_plan(
             detail=detail,
         )
 
-    # Redirect to the Customer Portal for the upgrade to avoid silent charges.
+    # Redirect to the Customer Portal so Stripe can confirm the change and
+    # apply the configured proration or end-of-period behavior.
     session = _create_billing_portal_session(
         customer=current_subscription["stripe_customer_id"],
         return_url=_portal_return_url(),
