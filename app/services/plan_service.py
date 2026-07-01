@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from math import ceil
 from fastapi import HTTPException, status
 from postgrest import AsyncPostgrestClient
 
@@ -132,6 +133,32 @@ def check_chat_input_length(text: str, plan: dict, field_name: str) -> None:
                 f"for the {plan_name} plan."
             ),
         )
+
+
+def estimate_text_tokens(*texts: str | None) -> int:
+    """Estimate token usage when provider-native streaming usage is unavailable."""
+    total_characters = sum(len(text) for text in texts if text)
+    if total_characters <= 0:
+        return 0
+    return max(1, ceil(total_characters / 4))
+
+
+def estimate_chat_tokens(
+    system_prompt: str,
+    user_message: str,
+    conversation_history: list[dict],
+    assistant_response: str,
+) -> int:
+    """Estimate prompt and completion tokens for a completed chat response."""
+    history_text = "\n".join(
+        str(message.get("content", "")) for message in conversation_history
+    )
+    return estimate_text_tokens(
+        system_prompt,
+        history_text,
+        user_message,
+        assistant_response,
+    )
 
 
 async def increment_user_usage(user_id: str, tokens: int = 0) -> None:

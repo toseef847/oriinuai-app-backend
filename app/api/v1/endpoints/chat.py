@@ -1,12 +1,17 @@
+import json
+import logging
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from postgrest import AsyncPostgrestClient
 from pydantic import BaseModel
+
 from app.core.security import get_current_access_token, get_current_user_id, get_user_db
 from app.services.plan_service import (
     check_chat_input_length,
     check_daily_limit,
+    estimate_chat_tokens,
     get_user_plan,
     increment_user_usage,
 )
@@ -20,9 +25,9 @@ from app.schemas.chat import (
     MessageEditRequest,
     ResponseRefineRequest,
 )
-import json
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -287,29 +292,51 @@ async def _stream_chat_response(
             return
 
         complete = "".join(full_response)
+        tokens_used = estimate_chat_tokens(
+            system_prompt=system_prompt,
+            user_message=actual_user_message,
+            conversation_history=history,
+            assistant_response=complete,
+        )
+        try:
+            async with user_postgrest_client(access_token) as stream_client:
+                if is_refinement and existing_assistant_msg_id:
+                    await stream_client.table("chat_messages").update(
+                        {
+                            "content": complete,
+                            "model_used": plan["llm_tier"],
+                            "tokens_used": tokens_used,
+                        }
+                    ).eq("id", str(existing_assistant_msg_id)).execute()
+                else:
+                    await stream_client.table("chat_messages").insert(
+                        {
+                            "session_id": str(session_id),
+                            "role": "assistant",
+                            "content": complete,
+                            "model_used": plan["llm_tier"],
+                            "tokens_used": tokens_used,
+                        }
+                    ).execute()
+
+                await stream_client.table("chat_sessions").update(
+                    {"updated_at": "now()"}
+                ).eq("id", str(session_id)).execute()
+
+            # Track usage before the terminal event so clients cannot close the
+            # stream on "done" before the daily counter is updated.
+            await increment_user_usage(user_id, tokens=tokens_used)
+        except Exception:
+            logger.exception("Unable to persist completed chat response")
+            error_payload = {
+                "type": "error",
+                "status": 500,
+                "message": "Unable to save chat response. Please try again.",
+            }
+            yield f"data: {json.dumps(error_payload)}\n\n"
+            return
+
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        async with user_postgrest_client(access_token) as stream_client:
-            if is_refinement and existing_assistant_msg_id:
-                await stream_client.table("chat_messages").update(
-                    {"content": complete, "model_used": plan["llm_tier"]}
-                ).eq("id", str(existing_assistant_msg_id)).execute()
-            else:
-                await stream_client.table("chat_messages").insert(
-                    {
-                        "session_id": str(session_id),
-                        "role": "assistant",
-                        "content": complete,
-                        "model_used": plan["llm_tier"],
-                    }
-                ).execute()
-
-            await stream_client.table("chat_sessions").update(
-                {"updated_at": "now()"}
-            ).eq("id", str(session_id)).execute()
-
-        # Track usage
-        await increment_user_usage(user_id)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
