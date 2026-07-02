@@ -14,7 +14,12 @@ class FakeEmbeddingModels:
     def embed_content(self, **kwargs):
         self.calls.append(kwargs)
         contents = kwargs["contents"]
-        count = len(contents) if isinstance(contents, list) else 1
+        count = (
+            len(contents)
+            if isinstance(contents, list)
+            and all(hasattr(content, "parts") for content in contents)
+            else 1
+        )
         embeddings = [
             SimpleNamespace(values=[float(index), 1.0]) for index in range(count)
         ]
@@ -38,9 +43,15 @@ def test_google_embedder_uses_new_client_response_shape() -> None:
     assert vectors == [[0.0, 1.0], [1.0, 1.0]]
     call = client.models.calls[0]
     assert call["model"] == "models/gemini-embedding-2"
-    assert call["contents"] == ["first", "second"]
+    assert len(call["contents"]) == 2
+    assert [
+        content.parts[0].text for content in call["contents"]
+    ] == [
+        "title: none | text: first",
+        "title: none | text: second",
+    ]
     assert call["config"].output_dimensionality == 768
-    assert call["config"].task_type == "RETRIEVAL_DOCUMENT"
+    assert call["config"].task_type is None
 
 
 def test_google_embedder_marks_queries_for_retrieval() -> None:
@@ -52,7 +63,9 @@ def test_google_embedder_marks_queries_for_retrieval() -> None:
     vector = embedder.embed_query("question")
 
     assert vector == [0.0, 1.0]
-    assert client.models.calls[0]["config"].task_type == "RETRIEVAL_QUERY"
+    call = client.models.calls[0]
+    assert call["contents"] == "task: search result | query: question"
+    assert call["config"].task_type is None
 
 
 def test_google_embedder_skips_empty_batches() -> None:
@@ -63,6 +76,15 @@ def test_google_embedder_skips_empty_batches() -> None:
 
     assert embedder.embed_texts([]) == []
     assert client.models.calls == []
+
+
+def test_google_embedder_rejects_aggregated_batch_response() -> None:
+    response = SimpleNamespace(
+        embeddings=[SimpleNamespace(values=[0.0, 1.0])]
+    )
+
+    with pytest.raises(ValueError, match="expected 2, received 1"):
+        Embedder._extract_google_embeddings(response, expected_count=2)
 
 
 class FakeAsyncModels:

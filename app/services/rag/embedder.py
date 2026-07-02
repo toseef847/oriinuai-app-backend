@@ -45,13 +45,19 @@ class Embedder:
             from google.genai import types
 
             client = self._get_google_client()
-            # Use gemini-embedding-2 for better performance and lower quota usage
+            document_contents = [
+                types.Content(
+                    parts=[
+                        types.Part.from_text(text=f"title: none | text: {text}")
+                    ]
+                )
+                for text in texts
+            ]
             try:
                 response = client.models.embed_content(
                     model="models/gemini-embedding-2",
-                    contents=texts,
+                    contents=document_contents,
                     config=types.EmbedContentConfig(
-                        task_type="RETRIEVAL_DOCUMENT",
                         output_dimensionality=self.dimensions,
                     ),
                 )
@@ -88,9 +94,8 @@ class Embedder:
             try:
                 response = client.models.embed_content(
                     model="models/gemini-embedding-2",
-                    contents=query,
+                    contents=f"task: search result | query: {query}",
                     config=types.EmbedContentConfig(
-                        task_type="RETRIEVAL_QUERY",
                         output_dimensionality=self.dimensions,
                     ),
                 )
