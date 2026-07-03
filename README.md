@@ -441,7 +441,7 @@ Admin POST /admin/books/upload
          │
          ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         Ingestion Background Task                       │
+│                       Upload + Ingestion Pipeline                       │
 │                                                                         │
 │  PDF File                                                               │
 │     │                                                                   │
@@ -450,35 +450,46 @@ Admin POST /admin/books/upload
 │                               └── Duplicate? → Return existing book_id  │
 │     │                                                                   │
 │     ▼                                                                   │
-│  2. Create book record (status: "pending")                              │
+│  2. Generate book UUID and storage key: books/{book_id}.pdf            │
 │     │                                                                   │
 │     ▼                                                                   │
-│  3. Upload raw PDF to Supabase Storage                                  │
+│  3. Upload raw PDF to Supabase Storage before returning success        │
 │     │                                                                   │
 │     ▼                                                                   │
-│  4. Extract text with pypdf                                             │
+│  4. Create book record (status: "pending")                              │
+│     └── DB failure → best-effort removal of uploaded storage object     │
 │     │                                                                   │
 │     ▼                                                                   │
-│  5. Chunk text                                                          │
+│  5. Schedule background ingestion, which downloads the stored PDF      │
+│     │                                                                   │
+│     ▼                                                                   │
+│  6. Extract text with pypdf                                             │
+│     │                                                                   │
+│     ▼                                                                   │
+│  7. Chunk text                                                          │
 │     ├── use_day_chunking=true: Split on "DAY \d+" regex patterns        │
 │     │   Metadata: {day_number, law_name, chunk_type: "day"}             │
 │     └── use_day_chunking=false: Word-count (512 words, 50 overlap)      │
 │         Metadata: {chunk_type: "generic"}                               │
 │     │                                                                   │
 │     ▼                                                                   │
-│  6. Batch embed chunks (20 per batch, 15s between batches)              │
+│  8. Batch embed chunks (20 per batch, 15s between batches)              │
 │     └── Provider: Google Gemini Embedding 2 (768-dim)                   │
 │             OR OpenAI text-embedding-3-small (1536-dim)                 │
 │     │   Exponential backoff: 30s → 60s → 90s on rate limit (429)       │
 │     │                                                                   │
 │     ▼                                                                   │
-│  7. Upsert vectors to book_chunks (pgvector)                            │
+│  9. Upsert vectors to book_chunks (pgvector)                            │
 │     │                                                                   │
 │     ▼                                                                   │
-│  8. UPDATE books SET status="ready", chunk_count=N                      │
+│ 10. UPDATE books SET status="ready", chunk_count=N                      │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+The original client filename is never used as a Storage object key. A successful
+upload response guarantees that both the UUID-keyed PDF and its `books` row exist;
+only extraction, chunking, embedding, and vector persistence remain asynchronous.
 
 ### RAG Query Flow (Per Chat Message)
 
