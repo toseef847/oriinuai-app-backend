@@ -1,5 +1,6 @@
 import hashlib
-from uuid import UUID
+import logging
+from uuid import UUID, uuid4
 from fastapi import (
     APIRouter,
     Depends,
@@ -19,6 +20,9 @@ from app.core.config import settings
 from app.utils.uploads import read_upload_with_limit
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+BOOK_PDF_BUCKET = "book-pdfs"
 
 
 class IngestBookPayload(BaseModel):
@@ -146,20 +150,50 @@ async def upload_book(
             message=f"Book already exists (Title: {book_data['title']})",
         )
 
-    # Step 1: Create DB record first (so we can return ID immediately)
+    book_id = uuid4()
+    storage_path = f"books/{book_id}.pdf"
+
+    # Persist the PDF before creating the database record. A successful response
+    # therefore guarantees that the book's storage object already exists.
+    try:
+        supabase_admin.storage.from_(BOOK_PDF_BUCKET).upload(
+            path=storage_path,
+            file=file_bytes,
+            file_options={"content-type": "application/pdf"},
+        )
+    except Exception:
+        logger.exception("Failed to upload book PDF to Supabase Storage")
+        raise HTTPException(
+            status_code=502,
+            detail="Book storage upload failed. Please try again.",
+        )
+
     book_data = {
+        "id": str(book_id),
         "title": title,
         "author": author,
         "file_hash": file_hash,
-        "storage_path": f"books/{file.filename}",
+        "storage_path": storage_path,
         "ingestion_status": "pending",
     }
 
-    book = supabase_admin.table("books").insert(book_data).execute()
-    book_id = book.data[0]["id"]
+    try:
+        book = supabase_admin.table("books").insert(book_data).execute()
+        if not book.data:
+            raise RuntimeError("Book insert returned no data")
+    except Exception:
+        logger.exception("Failed to create database record for uploaded book")
+        try:
+            supabase_admin.storage.from_(BOOK_PDF_BUCKET).remove([storage_path])
+        except Exception:
+            logger.exception("Failed to remove book PDF after database insert failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Book record creation failed. Please try again.",
+        )
 
-    # Step 2: Handoff everything else to background
-    background_tasks.add_task(ingest_book, book_id, file_bytes, use_day_chunking)
+    # Only extraction, chunking, and embedding continue in the background.
+    background_tasks.add_task(ingest_book, str(book_id), use_day_chunking)
 
     # Log action
     _log_admin_action(
@@ -176,7 +210,7 @@ async def upload_book(
             "status": "ingestion_started",
             "chunking_mode": "word_count",
         },
-        message="Book record created. Upload and ingestion continuing in background.",
+        message="Book uploaded. Ingestion continuing in background.",
     )
 
 
@@ -220,7 +254,7 @@ async def trigger_ingestion(
         ).execute()
 
         use_day_chunking = payload.use_day_chunking if payload else False
-        background_tasks.add_task(ingest_book, str(book_id), None, use_day_chunking)
+        background_tasks.add_task(ingest_book, str(book_id), use_day_chunking)
 
         # Log admin action
         _log_admin_action(
