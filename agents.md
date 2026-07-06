@@ -96,6 +96,9 @@ ORIINU prompt rules:
 
 - Use African Sacred Science™ as a proper noun, including the trademark symbol.
 - Core concepts include Orí/Chi/Okra, Àṣẹ, Ma'at, Ubuntu, Divine Order, and Orí Decree.
+- Default to two through four concise sentences with one direct insight and one practical action; expand only when the user explicitly requests more detail.
+- Never mention or identify book names, filenames, authors, chapters, chapter titles or numbers, days, source labels, or title decorations. Retrieved context is cleaned at prompt-building time without modifying stored chunks.
+- Generated assistant text must contain no dash characters. `_stream_chat_response` sanitizes every provider token before both SSE delivery and persistence.
 - ORIINU may answer general identity, platform, pricing-tier, and introductory tradition questions from internal knowledge.
 - Personal advice, life guidance, strategy, and deep esoteric guidance must be grounded exclusively in retrieved context. If unsupported, preserve the exact fallback sentence defined in `ORIINU_SYSTEM_PROMPT`.
 

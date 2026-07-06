@@ -79,8 +79,8 @@ class RecordingStreamClient:
 
 class SuccessfulProvider:
     async def stream_response(self, *args, **kwargs):
-        yield "Ori"
-        yield "inu"
+        yield "Ori—"
+        yield "inu-good"
 
 
 @pytest.mark.asyncio
@@ -214,8 +214,9 @@ async def test_stream_persists_and_increments_usage_before_done(monkeypatch) -> 
             assert calls[2] == ("usage", calls[0][2]["tokens_used"])
 
     body = "".join(chunks)
-    assert '"type": "token", "content": "Ori"' in body
-    assert '"type": "token", "content": "inu"' in body
+    assert '"type": "token", "content": "Ori "' in body
+    assert '"type": "token", "content": "inu good"' in body
+    assert calls[0][2]["content"] == "Ori inu good"
     assert '"type": "done"' in body
 
 

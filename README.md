@@ -511,11 +511,11 @@ User sends message "What does the oracle say about patience?"
    ┌──────────────────────────────────────────────────────────┐
    │ You are ORIINU, an African Sacred Science guide.         │
    │                                                          │
-   │ SACRED KNOWLEDGE CONTEXT:                               │
-   │ [Chunk 1: Day 42 — The Law of Patience...]              │
-   │ [Chunk 2: Day 107 — On the virtue of waiting...]        │
+   │ SACRED KNOWLEDGE CONTEXT:                                │
+   │ [Substantive source text with structural headings,       │
+   │  bylines, filenames, and decorations removed]            │
    │                                                          │
-   │ Use this context to answer the question.                 │
+   │ Answer directly in 2 to 4 concise sentences.             │
    └──────────────────────────────────────────────────────────┘
          │
          ▼
@@ -524,6 +524,10 @@ User sends message "What does the oracle say about patience?"
          ▼
 5. Stream LLM response via SSE (see Chat section)
 ```
+
+Retrieved source labels are never included in the prompt. ORIINU must not identify
+books, authors, chapters, days, filenames, or source decorations in an answer.
+Generated dash characters are replaced before SSE delivery and persistence.
 
 ---
 
