@@ -20,6 +20,7 @@ from app.services.llm.factory import get_llm_provider
 from app.services.llm.google_errors import FriendlyGoogleError
 from app.db.supabase import user_postgrest_client
 from app.utils.response import api_success
+from app.utils.text import remove_dash_characters
 from app.schemas.chat import (
     ChatRenameRequest,
     MessageEditRequest,
@@ -285,8 +286,9 @@ async def _stream_chat_response(
             async for token in llm.stream_response(
                 system_prompt, actual_user_message, history
             ):
-                full_response.append(token)
-                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                sanitized_token = remove_dash_characters(token)
+                full_response.append(sanitized_token)
+                yield f"data: {json.dumps({'type': 'token', 'content': sanitized_token})}\n\n"
         except FriendlyGoogleError as exception:
             yield f"data: {json.dumps({'type': 'error', 'status': exception.status_code, 'message': exception.user_message})}\n\n"
             return

@@ -1,3 +1,6 @@
+import re
+import unicodedata
+
 from postgrest import AsyncPostgrestClient
 
 from app.services.rag.embedder import embedder
@@ -32,13 +35,90 @@ STRICT ADVICE BOUNDARY:
 - If the user asks for specific guidance or advice that is not supported by the provided context, respond exactly with: "That specific wisdom isn't within my current alignment. Try rephrasing your question or ask about a specific tradition or life principle."
 
 RESPONSE STYLE:
-- **Clarity:** Provide clear, structured, and deep explanations.
-- **Alignment:** Ensure guidance is grounded.
-- **Power:** Offer practical, actionable steps.
+- Keep normal answers short and direct. Use 2 to 8 concise sentences.
+- Give one direct insight and one practical action.
+- Expand only when the user explicitly asks for more detail.
+- Use only the substantive teachings in the context. Never mention or identify a source, book, filename, author, chapter, chapter title, chapter number, day, day number, excerpt, or retrieved passage.
+- Do not reproduce title decorations or ornamental separators from source material.
+- Do not use hyphens, em dashes, en dashes, or any other dash characters in your response. Rewrite with spaces, commas, or periods instead.
+- Ensure all guidance is grounded.
 
 --- AFRICAN INTELLIGENCE CONTEXT ---
 {context}
 --- END CONTEXT ---"""
+
+
+_STRUCTURAL_HEADING_PATTERN = re.compile(
+    r"^\s*(chapter|day)\s+(\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten)\b(.*)$",
+    re.IGNORECASE,
+)
+_AUTHOR_LINE_PATTERN = re.compile(
+    r"^\s*(?:author|written\s+by|authored\s+by)\s*[:\-]?\s*.+$",
+    re.IGNORECASE,
+)
+_BARE_BYLINE_PATTERN = re.compile(r"^\s*by\s+\S+(?:\s+\S+){0,8}\s*$", re.IGNORECASE)
+_DECORATIVE_LINE_PATTERN = re.compile(r"^\s*[^\w\s]{2,}\s*$", re.UNICODE)
+_CURRENT_SOURCE_TITLES = (
+    "365 african proverbs",
+    "african prosperity book",
+    "olodumare updated",
+    "olodumare workbook companion",
+    "wealth power destiny",
+)
+
+
+def _normalize_source_line(line: str) -> str:
+    normalized = unicodedata.normalize("NFKD", line)
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[_\W]+", " ", normalized.lower(), flags=re.UNICODE)
+    return " ".join(normalized.split())
+
+
+def clean_retrieved_content(content: str) -> str:
+    """Remove source structure while preserving the substantive excerpt text."""
+    cleaned_lines: list[str] = []
+    skip_next_title = False
+    source_heading_seen = False
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            if cleaned_lines and cleaned_lines[-1] != "":
+                cleaned_lines.append("")
+            continue
+
+        normalized = _normalize_source_line(stripped)
+        if any(normalized.startswith(title) for title in _CURRENT_SOURCE_TITLES):
+            source_heading_seen = True
+            continue
+
+        if _DECORATIVE_LINE_PATTERN.fullmatch(stripped):
+            continue
+
+        heading_match = _STRUCTURAL_HEADING_PATTERN.fullmatch(stripped)
+        if heading_match:
+            trailing_text = heading_match.group(3).strip(" \t:.-–—")
+            skip_next_title = not trailing_text
+            continue
+
+        if skip_next_title:
+            skip_next_title = False
+            continue
+
+        if _AUTHOR_LINE_PATTERN.fullmatch(stripped):
+            continue
+
+        if source_heading_seen and _BARE_BYLINE_PATTERN.fullmatch(stripped):
+            source_heading_seen = False
+            continue
+
+        source_heading_seen = False
+        cleaned_lines.append(stripped)
+
+    while cleaned_lines and not cleaned_lines[-1]:
+        cleaned_lines.pop()
+    return "\n".join(cleaned_lines)
 
 
 async def build_rag_prompt(
@@ -57,15 +137,12 @@ async def build_rag_prompt(
     )
 
     context_parts = []
-    for i, chunk in enumerate(chunks):
-        day_num = chunk.get("chunk_index") or chunk.get("metadata", {}).get(
-            "day_number", ""
-        )
-        law_name = chunk.get("metadata", {}).get("law_name", "")
-        header = f"[Day {day_num} — {law_name}]" if day_num else f"[Excerpt {i+1}]"
-        context_parts.append(f"{header}\n{chunk['content']}")
+    for chunk in chunks:
+        cleaned_content = clean_retrieved_content(chunk["content"])
+        if cleaned_content:
+            context_parts.append(cleaned_content)
 
-    context = "\n\n---\n\n".join(context_parts)
+    context = "\n\n".join(context_parts)
     system_prompt = ORIINU_SYSTEM_PROMPT.format(context=context)
 
     return system_prompt, chunks
