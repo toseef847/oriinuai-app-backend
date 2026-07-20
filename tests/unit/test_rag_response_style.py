@@ -76,6 +76,79 @@ def test_system_prompt_requires_short_anonymous_answers() -> None:
     assert "Do not use hyphens" in query.ORIINU_SYSTEM_PROMPT
 
 
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "Help me make a decision about the direction of my life.",
+        "What is the best next step for my growth and purpose?",
+        "Give me clarity on the path I should take.",
+        "How do I find my path and move forward with purpose?",
+    ],
+)
+def test_broad_life_direction_queries_are_supported(user_message: str) -> None:
+    assert query.is_broad_life_direction_query(user_message)
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "Should I leave my job for another company?",
+        "Should I end my relationship?",
+        "What should I do about my finances?",
+    ],
+)
+def test_specific_personal_questions_remain_strictly_grounded(
+    user_message: str,
+) -> None:
+    assert not query.is_broad_life_direction_query(user_message)
+
+
+@pytest.mark.asyncio
+async def test_broad_life_direction_query_uses_framework_without_retrieval(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(query.embedder, "embed_query", lambda message: [0.1])
+    monkeypatch.setattr(
+        query.vector_store,
+        "similarity_search",
+        AsyncMock(return_value=[]),
+    )
+
+    system_prompt, chunks = await query.build_rag_prompt(
+        "What is the best next step for my growth and purpose?", object()
+    )
+
+    assert chunks == []
+    assert "clarity begins with honest reflection" in system_prompt
+    assert "one small practical action" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_retrieved_context_precedes_life_direction_framework(monkeypatch) -> None:
+    monkeypatch.setattr(query.embedder, "embed_query", lambda message: [0.1])
+    monkeypatch.setattr(
+        query.vector_store,
+        "similarity_search",
+        AsyncMock(
+            return_value=[
+                {
+                    "content": "Choose truth before speed.",
+                    "chunk_index": 1,
+                    "metadata": {},
+                }
+            ]
+        ),
+    )
+
+    system_prompt, _ = await query.build_rag_prompt(
+        "Give me clarity on the path I should take.", object()
+    )
+
+    assert system_prompt.index("Choose truth before speed.") < system_prompt.index(
+        "clarity begins with honest reflection"
+    )
+
+
 def test_remove_dash_characters_covers_common_dash_variants() -> None:
     value = "self-aware — grounded – clear ‐ focused‑action"
 
