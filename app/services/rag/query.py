@@ -35,7 +35,7 @@ STRICT ADVICE BOUNDARY:
 - If the user asks for specific guidance or advice that is not supported by the provided context, respond exactly with: "That specific wisdom isn't within my current alignment. Try rephrasing your question or ask about a specific tradition or life principle."
 
 RESPONSE STYLE:
-- Keep normal answers short and direct. Use 2 to 8 concise sentences.
+- Keep normal answers short and direct. Use 2 to 4 concise sentences.
 - Give one direct insight and one practical action.
 - Expand only when the user explicitly asks for more detail.
 - Use only the substantive teachings in the context. Never mention or identify a source, book, filename, author, chapter, chapter title, chapter number, day, day number, excerpt, or retrieved passage.
@@ -46,6 +46,54 @@ RESPONSE STYLE:
 --- AFRICAN INTELLIGENCE CONTEXT ---
 {context}
 --- END CONTEXT ---"""
+
+
+LIFE_DIRECTION_FRAMEWORK = """For broad questions about life direction, purpose, growth, or a next step, provide general guidance rather than claiming to know the user's destiny. Ground the response in this framework: clarity begins with honest reflection on what brings alignment, what no longer reflects the person's values, and what responsibility is immediately in front of them. Recommend one small practical action that creates evidence and movement, such as writing down the decision, choosing a reversible experiment, or taking one aligned step today. Keep the answer concise, dignified, and useful."""
+
+_LIFE_DIRECTION_PRESETS = frozenset(
+    {
+        "help me make a decision about the direction of my life",
+        "what is the best next step for my growth and purpose",
+        "give me clarity on the path i should take",
+    }
+)
+_LIFE_DIRECTION_TERMS = frozenset(
+    {
+        "clarity",
+        "decision",
+        "decisions",
+        "direction",
+        "future",
+        "growth",
+        "path",
+        "purpose",
+        "step",
+        "steps",
+    }
+)
+
+
+def is_broad_life_direction_query(user_message: str) -> bool:
+    """Identify general life-direction prompts without making a model call."""
+    normalized = _normalize_source_line(user_message)
+    if normalized in _LIFE_DIRECTION_PRESETS:
+        return True
+
+    terms = set(normalized.split())
+    matched_terms = terms & _LIFE_DIRECTION_TERMS
+    return len(matched_terms) >= 2 and any(
+        phrase in normalized
+        for phrase in (
+            "my life",
+            "life direction",
+            "next step",
+            "path i should",
+            "path should",
+            "find my path",
+            "find my purpose",
+            "move forward",
+        )
+    )
 
 
 _STRUCTURAL_HEADING_PATTERN = re.compile(
@@ -141,6 +189,9 @@ async def build_rag_prompt(
         cleaned_content = clean_retrieved_content(chunk["content"])
         if cleaned_content:
             context_parts.append(cleaned_content)
+
+    if is_broad_life_direction_query(user_message):
+        context_parts.append(LIFE_DIRECTION_FRAMEWORK)
 
     context = "\n\n".join(context_parts)
     system_prompt = ORIINU_SYSTEM_PROMPT.format(context=context)
